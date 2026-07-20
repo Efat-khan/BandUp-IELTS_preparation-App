@@ -106,6 +106,45 @@ real essays-with-known-official-bands for a real accuracy measurement.
   no grounding) — always rendered with an "AI-generated example" label and
   a copy-verbatim warning, never scored or treated as ground truth.
 
+## Phase 3: Speaking module
+
+A full Speaking test — Part 1 + Part 2 (cue card) + Part 3, tied together
+and scored holistically (one set of 4 criterion bands for the whole test,
+not a per-part score, matching real IELTS methodology).
+
+- `POST /api/speaking/sessions/start` — generates Part 1 (10-12 Qs across
+  2-3 topics), a Part 2 cue card (60s prep / up to 120s speaking), and
+  Part 3 follow-ups generated FROM Part 2's topic (`lib/speaking/generateSpeakingSession.ts`).
+- `components/AudioRecorder.tsx` — MediaRecorder capture with a visual
+  timer; Part 2 shows a 60s prep countdown before recording starts
+  automatically, then auto-stops at the 120s cap.
+- `POST /api/speaking/sessions/[id]/submit-part` — uploads the recording
+  (S3-compatible via `lib/storage/audioStorage.ts`, or a local-filesystem
+  dev fallback when no `S3_BUCKET` is configured — served back through
+  `/api/storage/audio/[...key]`), transcribes it with word-level
+  timestamps + confidence (Deepgram, `lib/stt/transcribe.ts` — swappable
+  behind the `SttProvider` interface), and extracts acoustic features in
+  pure code (`lib/speaking/acousticFeatures.ts`: speech rate, filled
+  pauses, silent pauses >0.5s, mean length of run, self-correction rate —
+  fully unit tested, no external API needed).
+- `POST /api/speaking/sessions/[id]/score` — the Speaking evaluator
+  (`lib/scoring/evaluateSpeaking.ts`) injects the official band
+  descriptors plus the code-computed acoustic metrics (as ground truth,
+  never re-derived by the model) into the prompt, double-pass scores FC/LR/GRA/PR,
+  and optionally passes Part 2's raw audio to Gemini (native audio input)
+  for a richer Pronunciation judgment.
+- Pronunciation: if `AZURE_SPEECH_KEY` is configured, a real
+  phoneme-level score is used and labeled "measured"
+  (`lib/speaking/pronunciation.ts`); otherwise the LLM's own audio-informed
+  PR band is used and labeled "estimated" — both paths are wired, only the
+  Azure integration itself is a stub (no key in scope for this phase).
+- UI (`/practice/speaking`): four criterion cards (with a measured/estimated
+  badge on Pronunciation), a fluency timeline overlaying filled pauses and
+  silent pauses (>0.5s) directly on the transcript, a speech-rate gauge vs.
+  the Band 7 target (~150 wpm), upgrade-phrase suggestions, and an
+  on-demand model cue-card answer (`POST /api/speaking/model-answer`) —
+  always labeled "AI-generated example."
+
 ## Docker
 
 ```bash

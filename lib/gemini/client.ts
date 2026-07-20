@@ -90,6 +90,39 @@ export async function scoreWithSchema<T>(
 }
 
 /**
+ * Scoring call with an optional raw-audio part (Gemini's native audio
+ * input) — used by the Speaking evaluator so Pronunciation judgments can
+ * be grounded in the actual recording rather than the transcript alone.
+ * Same Pro/temperature-0/structured-output contract as scoreWithSchema();
+ * pass `audio: null` to fall back to text-only scoring.
+ */
+export async function scoreWithSchemaAndAudio<T>(
+  systemPrompt: string,
+  userPrompt: string,
+  audio: { data: Buffer; mimeType: string } | null,
+  schema: StructuredSchema<T>,
+): Promise<T> {
+  const { model, temperature } = GEMINI_ROUTING.scoring;
+  const contents: Array<string | { inlineData: { mimeType: string; data: string } }> = [userPrompt];
+  if (audio) {
+    contents.push({ inlineData: { mimeType: audio.mimeType, data: audio.data.toString("base64") } });
+  }
+  const response = await withRetry(() =>
+    getClient().models.generateContent({
+      model,
+      contents,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature,
+        responseMimeType: "application/json",
+        responseJsonSchema: toResponseJsonSchema(schema),
+      },
+    }),
+  );
+  return parseStructuredResponse(responseText(response), schema);
+}
+
+/**
  * Trivial liveness check on the cheapest tier (Flash-Lite, temperature 0).
  * Used by /health; not part of the scoring/generation paths.
  */

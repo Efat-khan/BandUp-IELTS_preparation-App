@@ -71,6 +71,17 @@ enum MockSessionStatus {
   SCORED
 }
 
+enum PronunciationSource {
+  /**
+   * A real phoneme-level pronunciation API (e.g. Azure Pronunciation Assessment) was configured and used.
+   */
+  MEASURED
+  /**
+   * No pronunciation API configured — derived from the LLM's own audio-informed PR band instead.
+   */
+  ESTIMATED
+}
+
 enum SubmissionStatus {
   PENDING
   SCORING
@@ -122,6 +133,15 @@ model Question {
   // General Task 1 only — the letter's required register.
   letterRegister LetterRegister?
 
+  // Speaking Part 1 only — 2-3 topics x ~4 questions each (10-12 total).
+  part1Topics     Json?
+  // Speaking Part 2 only — the cue card's "you should say" bullet points.
+  cueCardPoints   Json?
+  prepSeconds     Int?
+  speakingSeconds Int?
+  // Speaking Part 3 only — 5-6 abstract follow-ups tied to the Part 2 cue card.
+  part3FollowUps  Json?
+
   // sha256(normalized topic_tag + prompt), used to de-dup a user's last
   // 20 generated questions instead of repeating topic/phrasing.
   dedupeHash String?
@@ -134,9 +154,12 @@ model Question {
   modelId   String?
   createdAt DateTime       @default(now())
 
-  submissions       Submission[]
-  mockTask1Sessions WritingMockSession[] @relation("MockTask1Question")
-  mockTask2Sessions WritingMockSession[] @relation("MockTask2Question")
+  submissions           Submission[]
+  mockTask1Sessions     WritingMockSession[] @relation("MockTask1Question")
+  mockTask2Sessions     WritingMockSession[] @relation("MockTask2Question")
+  speakingPart1Sessions SpeakingSession[]    @relation("SpeakingPart1Question")
+  speakingPart2Sessions SpeakingSession[]    @relation("SpeakingPart2Question")
+  speakingPart3Sessions SpeakingSession[]    @relation("SpeakingPart3Question")
 
   @@index([module, taskType])
   @@index([requestedByUserId, module, taskType, createdAt])
@@ -154,10 +177,15 @@ model Submission {
   answerText String?
   wordCount  Int?
 
-  // Speaking (later phase)
-  audioUrl        String?
-  transcript      String?
-  durationSeconds Int?
+  // Speaking
+  audioUrl         String?
+  transcript       String?
+  durationSeconds  Int?
+  // Word-level {word, start, end, confidence}[] from the STT provider.
+  wordTimestamps   Json?
+  // speechRateWpm, filledPauseCount, silentPauseCount, totalSilentPauseSeconds,
+  // meanLengthOfRun, selfCorrectionCount — computed in code (lib/speaking/acousticFeatures.ts).
+  acousticFeatures Json?
 
   // Aggregate results — unrounded is authoritative; the display value is the
   // officially rounded band, computed in code (lib/scoring), stored for audit.
@@ -180,19 +208,24 @@ model Submission {
 
   // Set when this submission is one half of a timed Task1+Task2 mock
   // (see WritingMockSession) rather than a standalone practice submission.
-  mockSessionId String?
+  mockSessionId     String?
+  // Set when this is one of the 3 recordings (Part1/2/3) of a Speaking
+  // test — which part it is is read off question.taskType, not duplicated here.
+  speakingSessionId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  question    Question            @relation(fields: [questionId], references: [id])
-  mockSession WritingMockSession? @relation(fields: [mockSessionId], references: [id])
-  scores      Score[]
-  feedback    Feedback[]
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question        Question            @relation(fields: [questionId], references: [id])
+  mockSession     WritingMockSession? @relation(fields: [mockSessionId], references: [id])
+  speakingSession SpeakingSession?    @relation(fields: [speakingSessionId], references: [id])
+  scores          Score[]
+  feedback        Feedback[]
 
   @@index([userId, createdAt])
   @@index([mockSessionId])
+  @@index([speakingSessionId])
   @@map("submissions")
 }
 
@@ -221,6 +254,44 @@ model WritingMockSession {
 
   @@index([userId, createdAt])
   @@map("writing_mock_sessions")
+}
+
+// Pairs Part 1 + Part 2 (cue card) + Part 3 (follow-ups tied to Part 2)
+// into one Speaking test. Unlike Writing, IELTS Speaking is scored
+// HOLISTICALLY across all three parts — one set of 4 criterion bands for
+// the whole test, not a per-part combination formula — so the criterion
+// breakdown lives here as JSON rather than per-Submission Score rows
+// (which assume one task per submission, true for Writing but not Speaking).
+model SpeakingSession {
+  id              String            @id @default(cuid())
+  userId          String
+  part1QuestionId String
+  part2QuestionId String
+  part3QuestionId String
+  status          MockSessionStatus @default(IN_PROGRESS)
+
+  // Simple average of the 4 criteria (FC/LR/GRA/PR), then the official
+  // rounding rule — unrounded is authoritative, band is display-only.
+  overallUnrounded Decimal? @db.Decimal(5, 3)
+  overallBand      Decimal? @db.Decimal(2, 1)
+
+  // { criterion, band, evidence[], why }[] for FC/LR/GRA/PR.
+  criteria            Json?
+  // Concrete phrase-upgrade suggestions surfaced in the UI.
+  upgradePhrases      Json?
+  // Whether PR came from a real pronunciation API or an LLM-derived estimate.
+  pronunciationSource PronunciationSource?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  part1Question Question     @relation("SpeakingPart1Question", fields: [part1QuestionId], references: [id])
+  part2Question Question     @relation("SpeakingPart2Question", fields: [part2QuestionId], references: [id])
+  part3Question Question     @relation("SpeakingPart3Question", fields: [part3QuestionId], references: [id])
+  submissions   Submission[]
+
+  @@index([userId, createdAt])
+  @@map("speaking_sessions")
 }
 
 model Score {

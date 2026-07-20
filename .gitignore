@@ -43,3 +43,6 @@ next-env.d.ts
 /app/generated/prisma
 !.env.example
 lib/generated/
+
+# locally-uploaded audio (LocalFilesystemStorageProvider dev fallback)
+/storage/
