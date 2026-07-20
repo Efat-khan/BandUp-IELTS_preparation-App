@@ -1,0 +1,21 @@
+# Auto-loaded by `docker compose up` alongside docker-compose.yml.
+# Turns the `app` service into a hot-reloading dev server instead of the
+# production standalone runner. Not used in CI/prod (there, run with
+# `docker compose -f docker-compose.yml up` to skip this file).
+services:
+  app:
+    build:
+      target: deps
+    command: sh -c "npx prisma generate && npm run dev"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    healthcheck:
+      disable: true
+
+  db:
+    ports:
+      - "5432:5432"
