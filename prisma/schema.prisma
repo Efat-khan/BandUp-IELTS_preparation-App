@@ -31,10 +31,11 @@ enum TaskType {
   SPEAKING_PART3
 }
 
-// Writing: TR (Task Response/Achievement), CC, LR, GRA
-// Speaking: FC (Fluency & Coherence), LR, GRA, PR (Pronunciation)
+// Writing Task 2: TR (Task Response); Writing Task 1: TA (Task Achievement)
+// Shared: CC, LR, GRA. Speaking: FC (Fluency & Coherence), LR, GRA, PR (Pronunciation)
 enum Criterion {
   TR
+  TA
   CC
   LR
   GRA
@@ -56,6 +57,18 @@ enum Difficulty {
   EASY
   MEDIUM
   HARD
+}
+
+enum LetterRegister {
+  FORMAL
+  SEMI_FORMAL
+  INFORMAL
+}
+
+enum MockSessionStatus {
+  IN_PROGRESS
+  SUBMITTED
+  SCORED
 }
 
 enum SubmissionStatus {
@@ -89,19 +102,25 @@ model User {
 }
 
 model Question {
-  id       String         @id @default(cuid())
-  module   Module
-  taskType TaskType
-  testType TestType       @default(ACADEMIC)
-  prompt   String
+  id                String     @id @default(cuid())
+  module            Module
+  taskType          TaskType
+  testType          TestType   @default(ACADEMIC)
+  prompt            String
   // Task 1 chart/diagram description or image reference
-  imageUrl String?
+  imageUrl          String?
   // topic_tag in the generation JSON contract (spec §5.3)
-  topic         String?
-  difficulty    Difficulty @default(MEDIUM)
-  instructions  String?
-  expectedWordCount Int    @default(250)
-  timeLimitSeconds  Int    @default(2400)
+  topic             String?
+  difficulty        Difficulty @default(MEDIUM)
+  instructions      String?
+  expectedWordCount Int        @default(250)
+  timeLimitSeconds  Int        @default(2400)
+
+  // Academic Task 1 only — the chart/table/process/map spec rendered on
+  // the frontend (line/bar/pie/table/process/map discriminated union).
+  chartSpec      Json?
+  // General Task 1 only — the letter's required register.
+  letterRegister LetterRegister?
 
   // sha256(normalized topic_tag + prompt), used to de-dup a user's last
   // 20 generated questions instead of repeating topic/phrasing.
@@ -115,7 +134,9 @@ model Question {
   modelId   String?
   createdAt DateTime       @default(now())
 
-  submissions Submission[]
+  submissions       Submission[]
+  mockTask1Sessions WritingMockSession[] @relation("MockTask1Question")
+  mockTask2Sessions WritingMockSession[] @relation("MockTask2Question")
 
   @@index([module, taskType])
   @@index([requestedByUserId, module, taskType, createdAt])
@@ -157,16 +178,49 @@ model Submission {
   wordCountPenaltyApplied Boolean @default(false)
   disagreementFlagged     Boolean @default(false)
 
+  // Set when this submission is one half of a timed Task1+Task2 mock
+  // (see WritingMockSession) rather than a standalone practice submission.
+  mockSessionId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  question Question   @relation(fields: [questionId], references: [id])
-  scores   Score[]
-  feedback Feedback[]
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question    Question            @relation(fields: [questionId], references: [id])
+  mockSession WritingMockSession? @relation(fields: [mockSessionId], references: [id])
+  scores      Score[]
+  feedback    Feedback[]
 
   @@index([userId, createdAt])
+  @@index([mockSessionId])
   @@map("submissions")
+}
+
+// Pairs one Task 1 + one Task 2 question into a single timed 60-minute
+// mock, scored together via the 1:2 Task1:Task2 overall Writing band.
+model WritingMockSession {
+  id               String            @id @default(cuid())
+  userId           String
+  task1QuestionId  String
+  task2QuestionId  String
+  status           MockSessionStatus @default(IN_PROGRESS)
+  timeLimitSeconds Int               @default(3600)
+  startedAt        DateTime          @default(now())
+
+  // Overall Writing band = (task1 + 2*task2) / 3, then the official
+  // rounding rule — unrounded is authoritative, band is display-only.
+  overallUnrounded Decimal? @db.Decimal(5, 3)
+  overallBand      Decimal? @db.Decimal(2, 1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task1Question Question     @relation("MockTask1Question", fields: [task1QuestionId], references: [id])
+  task2Question Question     @relation("MockTask2Question", fields: [task2QuestionId], references: [id])
+  submissions   Submission[]
+
+  @@index([userId, createdAt])
+  @@map("writing_mock_sessions")
 }
 
 model Score {

@@ -1,12 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChartRenderer } from "@/components/ChartRenderer";
 import { EssayEditor } from "@/components/EssayEditor";
 import { WritingResultsView, type WritingResult } from "@/components/WritingResultsView";
-import type { QuestionGenerationContract } from "@/lib/gemini/schemas/question";
+import type { ChartSpec } from "@/lib/gemini/schemas/chartSpec";
 
-interface GeneratedQuestion extends QuestionGenerationContract {
+type TestType = "academic" | "general";
+
+interface GeneratedTask1Question {
   id: string;
+  test_type: TestType;
+  topic_tag: string;
+  difficulty: "easy" | "medium" | "hard";
+  prompt: string;
+  instructions: string;
+  expected_word_count: number;
+  chart_spec?: ChartSpec;
+  register?: "formal" | "semi_formal" | "informal";
   deduped_retry: boolean;
 }
 
@@ -28,8 +39,9 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data;
 }
 
-export default function WritingPracticePage() {
-  const [question, setQuestion] = useState<GeneratedQuestion | null>(null);
+export default function Task1PracticePage() {
+  const [testType, setTestType] = useState<TestType>("academic");
+  const [question, setQuestion] = useState<GeneratedTask1Question | null>(null);
   const [essay, setEssay] = useState("");
   const [generating, setGenerating] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
@@ -42,10 +54,11 @@ export default function WritingPracticePage() {
     setGenerating(true);
     setError(null);
     setResult(null);
+    setQuestion(null);
     setEssay("");
     try {
-      const data = await postJson<GeneratedQuestion>("/api/questions/generate", {
-        taskType: "task2",
+      const data = await postJson<GeneratedTask1Question>("/api/questions/generate", {
+        taskType: testType === "academic" ? "task1_academic" : "task1_general",
       });
       setQuestion(data);
     } catch (e) {
@@ -78,11 +91,11 @@ export default function WritingPracticePage() {
       <main className="flex w-full max-w-3xl flex-col gap-8">
         <header>
           <h1 className="text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Writing Task 2 Practice
+            Writing Task 1 Practice
           </h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Generate a prompt, write your essay, and get an evidence-based band
-            estimate.
+            Academic: summarize a chart, table, process, or map. General Training: write a
+            letter.
           </p>
         </header>
 
@@ -93,14 +106,32 @@ export default function WritingPracticePage() {
         )}
 
         {!question && (
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={generating}
-            className="w-fit rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
-          >
-            {generating ? "Generating…" : "Generate Task 2"}
-          </button>
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-2">
+              {(["academic", "general"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTestType(t)}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                    testType === t
+                      ? "bg-foreground text-background"
+                      : "border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                  }`}
+                >
+                  {t === "academic" ? "Academic" : "General Training"}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={generating}
+              className="w-fit rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
+            >
+              {generating ? "Generating…" : `Generate Task 1 (${testType === "academic" ? "Academic" : "General"})`}
+            </button>
+          </div>
         )}
 
         {question && (
@@ -115,13 +146,23 @@ export default function WritingPracticePage() {
               <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
                 {question.difficulty}
               </span>
+              {question.register && (
+                <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                  {question.register}
+                </span>
+              )}
               {question.deduped_retry && (
                 <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                   re-generated to avoid a repeat topic
                 </span>
               )}
             </div>
-            <p className="text-base text-zinc-900 dark:text-zinc-100">{question.prompt}</p>
+
+            {question.chart_spec && <ChartRenderer spec={question.chart_spec} />}
+
+            <p className="whitespace-pre-line text-base text-zinc-900 dark:text-zinc-100">
+              {question.prompt}
+            </p>
             <p className="text-sm italic text-zinc-500 dark:text-zinc-400">
               {question.instructions}
             </p>
@@ -133,7 +174,7 @@ export default function WritingPracticePage() {
                   value={essay}
                   onChange={setEssay}
                   editable
-                  placeholder="Write your essay here…"
+                  placeholder="Write your response here…"
                 />
                 <div className="flex items-center justify-between">
                   <span
@@ -159,11 +200,11 @@ export default function WritingPracticePage() {
           </section>
         )}
 
-        {result && (
+        {result && question && (
           <WritingResultsView
             title="Overall band"
             essayText={essay}
-            questionPrompt={question?.prompt ?? ""}
+            questionPrompt={question.prompt}
             result={result}
           />
         )}

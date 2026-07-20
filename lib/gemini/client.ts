@@ -129,6 +129,26 @@ export async function generate(
 }
 
 /**
+ * Model rewrite: Flash tier, temperature 0.9, no tools. Rewrites a
+ * candidate's own paragraph at a target band — a coaching aid, not a
+ * scoring call, so no structured output/schema is involved.
+ */
+export async function rewriteParagraph(
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<string> {
+  const { model, temperature } = GEMINI_ROUTING.rewrite;
+  const response = await withRetry(() =>
+    getClient().models.generateContent({
+      model,
+      contents: userPrompt,
+      config: { systemInstruction: systemPrompt, temperature },
+    }),
+  );
+  return responseText(response);
+}
+
+/**
  * Coerces arbitrary free text into a target schema on the cheap Flash-Lite
  * tier, temperature 0, no tools. Exists because the Gemini API cannot
  * combine `tools` (e.g. Google Search grounding) with structured output in

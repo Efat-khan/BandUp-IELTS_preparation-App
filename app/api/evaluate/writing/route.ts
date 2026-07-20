@@ -1,10 +1,8 @@
 import type { NextRequest } from "next/server";
-import type { WritingCriterionId } from "@/lib/descriptors/writingTask2";
 import { resolveUserId } from "@/lib/demoUser";
 import { prisma } from "@/lib/db";
-import { GEMINI_MODELS } from "@/lib/gemini/models";
-import type { WritingEvaluation } from "@/lib/gemini/schemas/writingEvaluation";
-import { evaluateWritingTask2 } from "@/lib/scoring/evaluateWriting";
+import { evaluateWritingSubmission, type WritingTaskKind } from "@/lib/scoring/evaluateWriting";
+import { persistWritingEvaluation } from "@/lib/scoring/persistWritingEvaluation";
 
 export const dynamic = "force-dynamic";
 
@@ -14,14 +12,10 @@ interface EvaluateRequestBody {
   userId?: string;
 }
 
-const CRITERION_IDS: WritingCriterionId[] = ["TR", "CC", "LR", "GRA"];
-
-const CRITERION_KEY_MAP: Record<WritingCriterionId, keyof WritingEvaluation> = {
-  TR: "task_response",
-  CC: "coherence_cohesion",
-  LR: "lexical_resource",
-  GRA: "grammatical_range_accuracy",
-};
+function taskKindForQuestion(taskType: string, testType: string): WritingTaskKind {
+  if (taskType === "WRITING_TASK2") return "task2";
+  return testType === "ACADEMIC" ? "task1_academic" : "task1_general";
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,136 +46,20 @@ async function handleEvaluate(request: NextRequest): Promise<Response> {
   }
 
   const userId = await resolveUserId(body.userId);
+  const taskKind = taskKindForQuestion(question.taskType, question.testType);
 
-  const outcome = await evaluateWritingTask2({
+  const outcome = await evaluateWritingSubmission({
+    taskKind,
     questionPrompt: question.prompt,
     instructions: question.instructions ?? "",
     essayText: body.text,
   });
 
-  if (outcome.shortCircuited) {
-    const submission = await prisma.submission.create({
-      data: {
-        userId,
-        questionId: question.id,
-        module: "WRITING",
-        status: "FAILED",
-        answerText: body.text,
-        wordCount: outcome.preCheck.wordCount,
-      },
-    });
-    await prisma.feedback.create({
-      data: {
-        submissionId: submission.id,
-        kind: "EXAMINER_COMMENT",
-        content: outcome.shortCircuitReason ?? "Submission could not be scored.",
-      },
-    });
-    return Response.json(
-      { submissionId: submission.id, error: outcome.shortCircuitReason },
-      { status: 422 },
-    );
-  }
-
-  const {
-    criteria,
-    pass1,
-    disagreementFlagged,
-    unroundedTaskBand,
-    taskBand,
-    modelSelfEstimatedBand,
-    preCheck,
-  } = outcome;
-  if (!criteria || !pass1 || !outcome.pass2) {
-    return Response.json({ error: "Evaluation failed unexpectedly" }, { status: 500 });
-  }
-
-  const submission = await prisma.submission.create({
-    data: {
-      userId,
-      questionId: question.id,
-      module: "WRITING",
-      status: disagreementFlagged ? "FLAGGED" : "SCORED",
-      answerText: body.text,
-      wordCount: preCheck.wordCount,
-      overallUnrounded: unroundedTaskBand,
-      overallBand: taskBand,
-      modelSelfEstimatedBand,
-      inlineErrors: pass1.inline_errors,
-      wordCountPenaltyApplied: criteria.TR.wordCountPenaltyApplied,
-      disagreementFlagged,
-    },
+  const result = await persistWritingEvaluation(outcome, {
+    userId,
+    questionId: question.id,
+    answerText: body.text,
   });
 
-  const scoreRows = CRITERION_IDS.flatMap((criterionId) => {
-    const key = CRITERION_KEY_MAP[criterionId];
-    const p1 = pass1[key] as WritingEvaluation["task_response"];
-    const p2 = outcome.pass2![key] as WritingEvaluation["task_response"];
-    const canonical = criteria[criterionId];
-    return [
-      {
-        submissionId: submission.id,
-        pass: 1,
-        criterion: criterionId,
-        score: p1.band,
-        evidence: { evidence: p1.evidence, why: p1.why },
-        modelId: GEMINI_MODELS.scoring,
-      },
-      {
-        submissionId: submission.id,
-        pass: 2,
-        criterion: criterionId,
-        score: p2.band,
-        evidence: { evidence: p2.evidence, why: p2.why },
-        modelId: GEMINI_MODELS.scoring,
-      },
-      {
-        submissionId: submission.id,
-        pass: 0,
-        criterion: criterionId,
-        score: canonical.finalBand,
-        evidence: {
-          evidence: p1.evidence,
-          why: p1.why,
-          rawBand: canonical.rawBand,
-          wordCountPenaltyApplied: canonical.wordCountPenaltyApplied,
-          calibrationClamped: canonical.calibrationClamped,
-        },
-        modelId: GEMINI_MODELS.scoring,
-      },
-    ];
-  });
-  await prisma.score.createMany({ data: scoreRows });
-
-  await prisma.feedback.createMany({
-    data: pass1.next_band_actions.map((action) => ({
-      submissionId: submission.id,
-      kind: "IMPROVEMENTS" as const,
-      content: action,
-    })),
-  });
-
-  return Response.json({
-    submissionId: submission.id,
-    status: submission.status,
-    overallBand: taskBand,
-    overallUnrounded: unroundedTaskBand,
-    disagreementFlagged,
-    wordCount: preCheck.wordCount,
-    criteria: CRITERION_IDS.map((criterionId) => {
-      const key = CRITERION_KEY_MAP[criterionId];
-      const p1 = pass1[key] as WritingEvaluation["task_response"];
-      return {
-        criterion: criterionId,
-        band: criteria[criterionId].finalBand,
-        evidence: p1.evidence,
-        why: p1.why,
-        wordCountPenaltyApplied: criteria[criterionId].wordCountPenaltyApplied,
-        calibrationClamped: criteria[criterionId].calibrationClamped,
-      };
-    }),
-    inlineErrors: pass1.inline_errors,
-    nextBandActions: pass1.next_band_actions.slice(0, 3),
-    modelSelfEstimatedBand,
-  });
+  return Response.json(result, { status: outcome.shortCircuited ? 422 : 200 });
 }

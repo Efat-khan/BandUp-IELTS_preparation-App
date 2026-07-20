@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildWritingEvaluatorUserPrompt,
+  buildWritingTask1EvaluatorSystemPrompt,
   buildWritingTask2EvaluatorSystemPrompt,
-  buildWritingTask2EvaluatorUserPrompt,
 } from "./evaluator";
 
 describe("buildWritingTask2EvaluatorSystemPrompt", () => {
@@ -22,9 +23,33 @@ describe("buildWritingTask2EvaluatorSystemPrompt", () => {
   });
 });
 
-describe("buildWritingTask2EvaluatorUserPrompt", () => {
+describe("buildWritingTask1EvaluatorSystemPrompt", () => {
+  it("uses Task Achievement (not Task Response) and the academic descriptor set", () => {
+    const prompt = buildWritingTask1EvaluatorSystemPrompt("academic");
+    expect(prompt).toContain("Task Achievement");
+    expect(prompt).not.toContain("Task Response");
+    expect(prompt.toLowerCase()).toContain("data");
+    expect(prompt).toContain("Academic Task 1");
+  });
+
+  it("uses the general training descriptor set for general", () => {
+    const prompt = buildWritingTask1EvaluatorSystemPrompt("general");
+    expect(prompt).toContain("Task Achievement");
+    expect(prompt.toLowerCase()).toContain("letter");
+    expect(prompt).toContain("General Training Task 1");
+  });
+
+  it("still injects the shared CC/LR/GRA descriptors", () => {
+    const prompt = buildWritingTask1EvaluatorSystemPrompt("academic");
+    expect(prompt).toContain("Coherence and Cohesion");
+    expect(prompt).toContain("Lexical Resource");
+    expect(prompt).toContain("Grammatical Range and Accuracy");
+  });
+});
+
+describe("buildWritingEvaluatorUserPrompt", () => {
   it("includes the prompt, instructions, essay, and pre-check notes", () => {
-    const userPrompt = buildWritingTask2EvaluatorUserPrompt({
+    const userPrompt = buildWritingEvaluatorUserPrompt({
       questionPrompt: "Discuss both views on automation.",
       instructions: "Write at least 250 words.",
       essayText: "My essay text goes here.",
@@ -37,7 +62,7 @@ describe("buildWritingTask2EvaluatorUserPrompt", () => {
   });
 
   it("omits the pre-check section entirely when there are no notes", () => {
-    const userPrompt = buildWritingTask2EvaluatorUserPrompt({
+    const userPrompt = buildWritingEvaluatorUserPrompt({
       questionPrompt: "Prompt",
       instructions: "Instructions",
       essayText: "Essay",

@@ -24,6 +24,11 @@ export const GEMINI_ROUTING = {
     temperature: 0.9,
     searchGrounding: true,
   },
+  /** Model rewrite ("show me this paragraph at my target band"): Flash, high temp, no grounding — rewriting existing text, not researching. */
+  rewrite: {
+    model: GEMINI_MODELS.generation,
+    temperature: 0.9,
+  },
   precheck: {
     model: GEMINI_MODELS.precheck,
     temperature: 0,

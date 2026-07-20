@@ -4,16 +4,26 @@ import {
   WRITING_TASK2_DESCRIPTORS,
   type WritingCriterionId,
 } from "@/lib/descriptors/writingTask2";
+import {
+  getWritingTask1Descriptors,
+  WRITING_TASK1_CRITERION_NAMES,
+  type Task1BandDescriptorTable,
+  type WritingTask1CriterionId,
+} from "@/lib/descriptors/writingTask1";
 
-const CRITERIA_ORDER: WritingCriterionId[] = ["TR", "CC", "LR", "GRA"];
+const TASK2_CRITERIA_ORDER: WritingCriterionId[] = ["TR", "CC", "LR", "GRA"];
+const TASK1_CRITERIA_ORDER: WritingTask1CriterionId[] = ["TA", "CC", "LR", "GRA"];
 
-function renderDescriptorTable(criterion: WritingCriterionId): string {
-  const table = WRITING_TASK2_DESCRIPTORS[criterion];
+function renderDescriptorTable(
+  label: string,
+  criterionId: string,
+  table: Task1BandDescriptorTable,
+): string {
   const bands = [9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
   const lines = bands
     .filter((band) => table[band])
     .map((band) => `  Band ${band}: ${table[band]}`);
-  return `${WRITING_CRITERION_NAMES[criterion]} (${criterion}):\n${lines.join("\n")}`;
+  return `${label} (${criterionId}):\n${lines.join("\n")}`;
 }
 
 function renderCalibrationAnchors(): string {
@@ -30,7 +40,9 @@ function renderCalibrationAnchors(): string {
  * every single time a scoring call is made (non-negotiable rule #1).
  */
 export function buildWritingTask2EvaluatorSystemPrompt(): string {
-  const descriptorBlock = CRITERIA_ORDER.map(renderDescriptorTable).join("\n\n");
+  const descriptorBlock = TASK2_CRITERIA_ORDER.map((c) =>
+    renderDescriptorTable(WRITING_CRITERION_NAMES[c], c, WRITING_TASK2_DESCRIPTORS[c]),
+  ).join("\n\n");
 
   return `You are an IELTS Writing examiner scoring a Task 2 essay. You score \
 strictly against the official IELTS Writing Task 2 band descriptors below — \
@@ -45,7 +57,37 @@ ${descriptorBlock}
 
 ${renderCalibrationAnchors()}
 
-## Rules
+${EVALUATOR_RULES}`;
+}
+
+/**
+ * Task 1 shares the same evaluator rules and JSON contract as Task 2, but
+ * scores Task Achievement (TA) instead of Task Response (TR), and TA's
+ * descriptor text differs between Academic (accurate data reporting) and
+ * General Training (letter purpose/tone/coverage) — see
+ * lib/descriptors/writingTask1.ts.
+ */
+export function buildWritingTask1EvaluatorSystemPrompt(testType: "academic" | "general"): string {
+  const descriptors = getWritingTask1Descriptors(testType);
+  const descriptorBlock = TASK1_CRITERIA_ORDER.map((c) =>
+    renderDescriptorTable(WRITING_TASK1_CRITERION_NAMES[c], c, descriptors[c]),
+  ).join("\n\n");
+
+  const taskLabel = testType === "academic" ? "Academic" : "General Training";
+
+  return `You are an IELTS Writing examiner scoring a ${taskLabel} Task 1 \
+response. You score strictly against the official IELTS Writing Task 1 \
+band descriptors below — never from general impression or instinct.
+
+## Official band descriptors (Task Achievement, Coherence & Cohesion, \
+Lexical Resource, Grammatical Range & Accuracy)
+
+${descriptorBlock}
+
+${EVALUATOR_RULES}`;
+}
+
+const EVALUATOR_RULES = `## Rules
 
 1. Score EACH of the four criteria independently. Do not let one criterion's \
 score influence another.
@@ -61,15 +103,14 @@ quarter fraction.
 5. List concrete inline_errors (grammar, vocabulary, punctuation, spelling, \
 cohesion) with the offending quote, the issue, and a corrected version.
 6. next_band_actions must be the 3-6 most impactful, concrete changes that \
-would move this specific essay to the next band — not generic advice.
+would move this specific response to the next band — not generic advice.
 7. estimated_task_band is your own holistic best estimate of the overall \
-Task 2 band (average of the four criteria); it is a cross-check value, not \
-a substitute for the four independent criterion scores.
+band for this task (average of the four criteria); it is a cross-check \
+value, not a substitute for the four independent criterion scores.
 8. Output ONLY the structured JSON specified by the response schema — no \
 prose, no markdown, no commentary outside the schema fields.`;
-}
 
-export function buildWritingTask2EvaluatorUserPrompt(input: {
+export function buildWritingEvaluatorUserPrompt(input: {
   questionPrompt: string;
   instructions: string;
   essayText: string;
@@ -81,7 +122,7 @@ export function buildWritingTask2EvaluatorUserPrompt(input: {
 ground truth, do not recount):\n${input.preCheckNotes.map((n) => `- ${n}`).join("\n")}`
       : "";
 
-  return `## Task 2 prompt
+  return `## Task prompt
 ${input.questionPrompt}
 
 ## Task instructions

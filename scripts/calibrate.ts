@@ -1,46 +1,57 @@
 /**
- * Calibration harness: runs the Writing Task 2 evaluator over a gold set of
- * essays with known official bands and reports MAE + % within ±0.5 band,
- * plus a per-criterion drift table.
+ * Calibration harness: runs the Writing evaluator (Task 1 Academic/General
+ * or Task 2) over a gold set of essays with known official bands and
+ * reports MAE + % within ±0.5 band, plus a per-criterion drift table.
  *
  * Usage: npm run calibrate
  *
  * Reads every *.json file in /calibration (see calibration/README.md for
  * the expected shape). Does not touch the database — this is purely a
- * model-accuracy measurement against evaluateWritingTask2(), the same core
- * function the /api/evaluate/writing route uses.
+ * model-accuracy measurement against evaluateWritingSubmission(), the same
+ * core function the /api/evaluate/writing and /api/mock/writing/submit
+ * routes use.
  */
 import "dotenv/config";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import * as z from "zod";
-import { evaluateWritingTask2 } from "../lib/scoring/evaluateWriting";
+import { evaluateWritingSubmission, type WritingTaskKind } from "../lib/scoring/evaluateWriting";
 
 const CALIBRATION_DIR = path.resolve(__dirname, "../calibration");
-const DEFAULT_INSTRUCTIONS =
-  "You should spend about 40 minutes on this task and write at least 250 words.";
+const DEFAULT_INSTRUCTIONS_BY_TASK: Record<WritingTaskKind, string> = {
+  task2: "You should spend about 40 minutes on this task and write at least 250 words.",
+  task1_academic: "You should spend about 20 minutes on this task and write at least 150 words.",
+  task1_general: "You should spend about 20 minutes on this task and write at least 150 words.",
+};
 const TARGET_WITHIN_HALF_BAND_PCT = 85;
 
 const CalibrationEssaySchema = z.object({
   id: z.string(),
   /** Mark true for placeholder essays used only to exercise the harness — never real gold data. */
   synthetic: z.boolean().optional().default(false),
+  task_kind: z.enum(["task1_academic", "task1_general", "task2"]).optional().default("task2"),
   prompt: z.string(),
   instructions: z.string().optional(),
   essay: z.string(),
-  official_bands: z.object({
-    task_response: z.number(),
-    coherence_cohesion: z.number(),
-    lexical_resource: z.number(),
-    grammatical_range_accuracy: z.number(),
-    overall: z.number(),
-  }),
+  official_bands: z
+    .object({
+      /** Task 2 only. */
+      task_response: z.number().optional(),
+      /** Task 1 (either variant) only. */
+      task_achievement: z.number().optional(),
+      coherence_cohesion: z.number(),
+      lexical_resource: z.number(),
+      grammatical_range_accuracy: z.number(),
+      overall: z.number(),
+    })
+    .refine((v) => v.task_response !== undefined || v.task_achievement !== undefined, {
+      message: "official_bands must include task_response (Task 2) or task_achievement (Task 1)",
+    }),
 });
 
 type CalibrationEssay = z.infer<typeof CalibrationEssaySchema>;
 
-const CRITERIA_KEYS = [
-  "task_response",
+const SECONDARY_CRITERIA_KEYS = [
   "coherence_cohesion",
   "lexical_resource",
   "grammatical_range_accuracy",
@@ -49,9 +60,13 @@ const CRITERIA_KEYS = [
 interface ScoredRow {
   id: string;
   synthetic: boolean;
-  official: CalibrationEssay["official_bands"];
+  taskKind: WritingTaskKind;
+  officialPrimary: number;
+  officialSecondary: Record<(typeof SECONDARY_CRITERIA_KEYS)[number], number>;
+  officialOverall: number;
+  predictedPrimary: number;
+  predictedSecondary: Record<(typeof SECONDARY_CRITERIA_KEYS)[number], number>;
   predictedOverall: number;
-  predictedCriteria: Record<(typeof CRITERIA_KEYS)[number], number>;
 }
 
 interface SkippedRow {
@@ -95,11 +110,12 @@ async function main() {
   const skipped: SkippedRow[] = [];
 
   for (const essay of essays) {
-    process.stdout.write(`Evaluating ${essay.id}... `);
+    process.stdout.write(`Evaluating ${essay.id} (${essay.task_kind})... `);
     try {
-      const outcome = await evaluateWritingTask2({
+      const outcome = await evaluateWritingSubmission({
+        taskKind: essay.task_kind,
         questionPrompt: essay.prompt,
-        instructions: essay.instructions ?? DEFAULT_INSTRUCTIONS,
+        instructions: essay.instructions ?? DEFAULT_INSTRUCTIONS_BY_TASK[essay.task_kind],
         essayText: essay.essay,
       });
 
@@ -110,18 +126,28 @@ async function main() {
         continue;
       }
 
+      const officialPrimary =
+        essay.official_bands.task_response ?? essay.official_bands.task_achievement!;
+
       console.log(`done (predicted ${outcome.taskBand}, official ${essay.official_bands.overall})`);
       scored.push({
         id: essay.id,
         synthetic: essay.synthetic,
-        official: essay.official_bands,
-        predictedOverall: outcome.taskBand,
-        predictedCriteria: {
-          task_response: outcome.criteria.TR.finalBand,
+        taskKind: essay.task_kind,
+        officialPrimary,
+        officialSecondary: {
+          coherence_cohesion: essay.official_bands.coherence_cohesion,
+          lexical_resource: essay.official_bands.lexical_resource,
+          grammatical_range_accuracy: essay.official_bands.grammatical_range_accuracy,
+        },
+        officialOverall: essay.official_bands.overall,
+        predictedPrimary: outcome.criteria[outcome.primaryCriterion].finalBand,
+        predictedSecondary: {
           coherence_cohesion: outcome.criteria.CC.finalBand,
           lexical_resource: outcome.criteria.LR.finalBand,
           grammatical_range_accuracy: outcome.criteria.GRA.finalBand,
         },
+        predictedOverall: outcome.taskBand,
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -142,7 +168,7 @@ async function main() {
     return;
   }
 
-  const overallErrors = scored.map((r) => Math.abs(r.predictedOverall - r.official.overall));
+  const overallErrors = scored.map((r) => Math.abs(r.predictedOverall - r.officialOverall));
   const mae = overallErrors.reduce((a, b) => a + b, 0) / overallErrors.length;
   const withinHalf = overallErrors.filter((e) => e <= 0.5).length;
   const withinHalfPct = (withinHalf / scored.length) * 100;
@@ -156,8 +182,18 @@ async function main() {
 
   console.log("\nPer-criterion drift (predicted - official):");
   console.log(padRight("criterion", 28) + padLeft("mean signed", 14) + padLeft("MAE", 10));
-  for (const key of CRITERIA_KEYS) {
-    const diffs = scored.map((r) => r.predictedCriteria[key] - r.official[key]);
+
+  const primaryDiffs = scored.map((r) => r.predictedPrimary - r.officialPrimary);
+  const primaryMeanSigned = primaryDiffs.reduce((a, b) => a + b, 0) / primaryDiffs.length;
+  const primaryMae = primaryDiffs.reduce((a, b) => a + Math.abs(b), 0) / primaryDiffs.length;
+  console.log(
+    padRight("primary (TR/TA)", 28) +
+      padLeft(primaryMeanSigned.toFixed(3), 14) +
+      padLeft(primaryMae.toFixed(3), 10),
+  );
+
+  for (const key of SECONDARY_CRITERIA_KEYS) {
+    const diffs = scored.map((r) => r.predictedSecondary[key] - r.officialSecondary[key]);
     const meanSigned = diffs.reduce((a, b) => a + b, 0) / diffs.length;
     const criterionMae = diffs.reduce((a, b) => a + Math.abs(b), 0) / diffs.length;
     console.log(

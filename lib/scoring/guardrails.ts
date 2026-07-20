@@ -1,15 +1,17 @@
-import type { WritingCriterionId } from "@/lib/descriptors/writingTask2";
-
 /**
  * Deterministic scoring guardrails (spec §6.1 Step 1 pre-checks, plus
  * post-process guardrails). These run in CODE, never delegated to the LLM:
  * - word count, empty/gibberish/off-topic, paragraph count, memorized
  *   templates (pre-checks, computed before any scoring call)
- * - the word-count Task Response cap and the calibration ceiling clamp
+ * - the word-count primary-criterion cap and the calibration ceiling clamp
  *   (post-process, applied to the LLM's own criterion bands)
  */
 
+/** TR (Task Response, Task 2) and TA (Task Achievement, Task 1) share the same guardrail mechanics. */
+export type ScoredCriterionId = "TR" | "TA" | "CC" | "LR" | "GRA";
+
 export const MIN_TASK2_WORD_COUNT = 250;
+export const MIN_TASK1_WORD_COUNT = 150;
 export const WORD_COUNT_TR_CAP = 6;
 
 /** Below this many words, gibberish detection is unreliable — the word-count guardrail already covers short answers. */
@@ -103,6 +105,7 @@ function detectTemplatePhrases(text: string): string[] {
 export function runWritingPreChecks(
   promptText: string,
   essayText: string,
+  minWordCount: number = MIN_TASK2_WORD_COUNT,
 ): WritingPreCheckResult {
   const trimmed = essayText.trim();
   const wordCount = countWords(trimmed);
@@ -113,12 +116,10 @@ export function runWritingPreChecks(
   const isOffTopic = !isEmpty && !isGibberish && detectOffTopic(promptText, trimmed);
   const templatePhrasesDetected = isEmpty ? [] : detectTemplatePhrases(trimmed);
 
-  const notes: string[] = [
-    `Word count: ${wordCount} (minimum required: ${MIN_TASK2_WORD_COUNT}).`,
-  ];
-  if (wordCount < MIN_TASK2_WORD_COUNT) {
+  const notes: string[] = [`Word count: ${wordCount} (minimum required: ${minWordCount}).`];
+  if (wordCount < minWordCount) {
     notes.push(
-      "Below the 250-word minimum — a Task Response penalty is applied in code regardless of the band you assign.",
+      `Below the ${minWordCount}-word minimum — a Task Achievement/Response penalty is applied in code regardless of the band you assign.`,
     );
   }
   notes.push(`Paragraph count: ${paragraphCount}.`);
@@ -151,15 +152,16 @@ export function runWritingPreChecks(
 }
 
 /**
- * Under-length answers get their Task Response capped in CODE — the LLM's
- * own band for TR is never trusted to apply this on its own.
+ * Under-length answers get their primary criterion (TR for Task 2, TA for
+ * Task 1) capped in CODE — the LLM's own band is never trusted to apply
+ * this on its own.
  */
 export function applyWordCountPenalty(
-  taskResponseBand: number,
+  primaryCriterionBand: number,
   meetsMinWordCount: boolean,
 ): { band: number; applied: boolean } {
-  if (meetsMinWordCount || taskResponseBand <= WORD_COUNT_TR_CAP) {
-    return { band: taskResponseBand, applied: false };
+  if (meetsMinWordCount || primaryCriterionBand <= WORD_COUNT_TR_CAP) {
+    return { band: primaryCriterionBand, applied: false };
   }
   return { band: WORD_COUNT_TR_CAP, applied: true };
 }
@@ -173,15 +175,16 @@ export function applyWordCountPenalty(
  * entry here — that report is what should justify any non-default value,
  * not a guess made ahead of the data.
  */
-export const CALIBRATION_CEILING: Record<WritingCriterionId, number> = {
+export const CALIBRATION_CEILING: Record<ScoredCriterionId, number> = {
   TR: 9,
+  TA: 9,
   CC: 9,
   LR: 9,
   GRA: 9,
 };
 
 export function applyCalibrationCeiling(
-  criterion: WritingCriterionId,
+  criterion: ScoredCriterionId,
   band: number,
 ): { band: number; clamped: boolean } {
   const ceiling = CALIBRATION_CEILING[criterion];

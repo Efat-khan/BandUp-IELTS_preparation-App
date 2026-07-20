@@ -72,6 +72,40 @@ file format — the `_placeholder-*.json` files there are synthetic
 (`"synthetic": true`) and only prove the harness runs; replace them with
 real essays-with-known-official-bands for a real accuracy measurement.
 
+## Phase 2: complete Writing module (Task 1 + Task 2 + mock)
+
+- `POST /api/questions/generate` now accepts `taskType: "task1_academic" |
+  "task1_general" | "task2"` (default `"task2"`). Academic Task 1 responses
+  include a `chart_spec` (line/bar/pie/table, or a process/map description)
+  rendered on the frontend with Recharts (`components/ChartRenderer.tsx`).
+  General Task 1 responses are a letter prompt with a `register`
+  (`formal`/`semi_formal`/`informal`).
+- `POST /api/evaluate/writing` detects the question's task type and scores
+  against the right descriptor set — Task Achievement (TA) for Task 1
+  (Academic data-reporting accuracy vs. General letter purpose/tone/
+  coverage) or Task Response (TR) for Task 2 — with a 150-word minimum for
+  Task 1 vs. 250 for Task 2. Same double-pass/guardrail pipeline
+  (`lib/scoring/evaluateWriting.ts`, generalized across all three task
+  kinds).
+- `/practice/writing/task1` — Academic (chart) or General (letter) Task 1
+  practice, same results view as Task 2.
+- Full mock (`/practice/writing/mock`, `POST /api/mock/writing/start` +
+  `/api/mock/writing/submit`): one timed 60-minute session pairing a
+  generated Task 1 + Task 2, submitted and scored together. The overall
+  Writing band combines the two per-task bands via `combineWritingBand()`
+  (`(task1 + 2×task2) / 3`, then the official rounding rule).
+- Inline annotation (`components/EssayEditor.tsx`, TipTap): while writing,
+  a plain rich-text editor; once scored, it re-renders read-only with each
+  `inline_errors[]` quote highlighted in place (`lib/writing/annotate.ts`
+  locates the quotes and builds the marked-up HTML) — hovering a highlight
+  shows the issue, the suggested correction, and the category/rule
+  violated.
+- Model rewrite (`POST /api/writing/rewrite`, "Show me this paragraph at
+  my target band" in the results view): rewrites one paragraph of the
+  candidate's own answer at a target band (Gemini Flash, temperature 0.9,
+  no grounding) — always rendered with an "AI-generated example" label and
+  a copy-verbatim warning, never scored or treated as ground truth.
+
 ## Docker
 
 ```bash

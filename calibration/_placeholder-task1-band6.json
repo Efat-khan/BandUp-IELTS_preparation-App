@@ -1,0 +1,15 @@
+{
+  "id": "_placeholder-task1-band6",
+  "synthetic": true,
+  "task_kind": "task1_academic",
+  "prompt": "The chart below shows the percentage of households with internet access in three countries between 2000 and 2020. Summarize the information by selecting and reporting the main features, and make comparisons where relevant.",
+  "instructions": "You should spend about 20 minutes on this task and write at least 150 words.",
+  "essay": "The line chart shows internet access rates in three countries from 2000 to 2020.\n\nOverall, all three countries saw internet access increase a lot during this period. Country A had the highest rate at the end, while Country C had the lowest rate throughout the period.\n\nIn 2000, internet access was low in all countries, ranging from 2% to 10%. Country A grew the fastest, reaching 95% by 2020. Country B followed a similar pattern but ended lower at around 80%.\n\nCountry C started the lowest and grew more slowly, only reaching 45% by 2020. This means there was a big gap between country C and the other two countries by the end of the period.",
+  "official_bands": {
+    "task_achievement": 6,
+    "coherence_cohesion": 6,
+    "lexical_resource": 5.5,
+    "grammatical_range_accuracy": 6,
+    "overall": 6
+  }
+}
