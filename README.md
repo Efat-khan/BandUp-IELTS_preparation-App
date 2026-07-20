@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BandUp — AI-powered IELTS Writing & Speaking Tutor
 
-## Getting Started
+Scaffold stage. The authoritative product/technical spec lives in
+`BandUp_Documentation.md` (not yet committed to this repository — add it at
+the repo root).
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Next.js (App Router) + TypeScript + Tailwind CSS, as a PWA
+- Next.js API routes (Node) for orchestration
+- PostgreSQL via Prisma ORM
+- Google Gemini via `@google/genai` (model routing pinned in `lib/gemini/models.ts`)
+- Later phases: STT with word timestamps, S3-compatible audio storage, Clerk auth
+
+## Layout
+
+```
+/app              Next.js routes + pages (health check at /health)
+/lib/gemini       Gemini client, model routing config, structured-output helpers
+/lib/scoring      Rounding, band combination, guardrails, double-pass
+/lib/prompts      Evaluator + generator system prompts
+/lib/descriptors  Band descriptor KB as typed constants
+/prisma           schema.prisma + migrations
+/components       UI components
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cp .env.example .env   # fill in GEMINI_API_KEY and DATABASE_URL
+npm install
+npx prisma migrate deploy
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Tests
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm test
+```
