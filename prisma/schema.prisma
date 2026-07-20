@@ -47,6 +47,17 @@ enum QuestionSource {
   GENERATED
 }
 
+enum TestType {
+  ACADEMIC
+  GENERAL
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
 enum SubmissionStatus {
   PENDING
   SCORING
@@ -78,13 +89,27 @@ model User {
 }
 
 model Question {
-  id        String         @id @default(cuid())
-  module    Module
-  taskType  TaskType
-  prompt    String
+  id       String         @id @default(cuid())
+  module   Module
+  taskType TaskType
+  testType TestType       @default(ACADEMIC)
+  prompt   String
   // Task 1 chart/diagram description or image reference
-  imageUrl  String?
-  topic     String?
+  imageUrl String?
+  // topic_tag in the generation JSON contract (spec §5.3)
+  topic         String?
+  difficulty    Difficulty @default(MEDIUM)
+  instructions  String?
+  expectedWordCount Int    @default(250)
+  timeLimitSeconds  Int    @default(2400)
+
+  // sha256(normalized topic_tag + prompt), used to de-dup a user's last
+  // 20 generated questions instead of repeating topic/phrasing.
+  dedupeHash String?
+
+  // Who this question was generated for (null for shared/seeded questions).
+  requestedByUserId String?
+
   source    QuestionSource @default(GENERATED)
   // Pinned model ID that generated this question, null for seeds
   modelId   String?
@@ -93,6 +118,7 @@ model Question {
   submissions Submission[]
 
   @@index([module, taskType])
+  @@index([requestedByUserId, module, taskType, createdAt])
   @@map("questions")
 }
 
@@ -117,6 +143,16 @@ model Submission {
   overallUnrounded Decimal? @db.Decimal(5, 3)
   overallBand      Decimal? @db.Decimal(2, 1)
 
+  // The evaluator's own self-reported estimated_task_band (spec §10.2),
+  // kept purely for audit/drift analysis against the code-computed band —
+  // never the value that gets displayed or persisted as authoritative.
+  modelSelfEstimatedBand Decimal? @db.Decimal(2, 1)
+
+  // inline_errors[] from the evaluator's structured output (quote/issue/
+  // correction/category) — a structured list with no relational reuse
+  // elsewhere, so it lives as JSON rather than its own table.
+  inlineErrors Json?
+
   // Deterministic guardrails applied in code
   wordCountPenaltyApplied Boolean @default(false)
   disagreementFlagged     Boolean @default(false)
@@ -136,7 +172,10 @@ model Submission {
 model Score {
   id           String    @id @default(cuid())
   submissionId String
-  // Double-pass scoring: pass 1 and pass 2 rows per criterion
+  // pass 1 and 2 are the raw double-pass LLM scoring calls (audit trail);
+  // pass 0 is the canonical final score after averaging the two passes
+  // and applying code guardrails (word-count cap, calibration ceiling) —
+  // pass 0 is what overallUnrounded/overallBand are derived from.
   pass         Int       @default(1)
   criterion    Criterion
   // UNROUNDED sub-score as returned by the evaluator

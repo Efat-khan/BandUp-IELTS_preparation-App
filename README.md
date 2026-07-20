@@ -39,6 +39,39 @@ npm run dev
 npm test
 ```
 
+## Phase 1: Writing Task 2 evaluation loop
+
+End-to-end question generation → evaluation loop for IELTS Writing Task 2.
+
+- `POST /api/questions/generate` — generates one Task 2 prompt (Gemini
+  Flash + Search grounding), de-duped against the requesting user's last 20
+  questions. Body: `{ userId?, testType?: "academic"|"general", difficulty?: "easy"|"medium"|"hard" }`
+  (all optional — falls back to a single upserted demo user until real auth
+  is wired).
+- `POST /api/evaluate/writing` — scores an essay against the question.
+  Body: `{ questionId, text, userId? }`. Runs code pre-checks (word count,
+  empty/gibberish/off-topic, paragraph count, memorized-template
+  detection), then double-pass structured scoring on Gemini Pro at
+  temperature 0, then code post-processing (word-count Task Response cap,
+  calibration ceiling clamp). Persists the submission, both raw passes and
+  the canonical score, and feedback.
+- `/practice/writing` — minimal UI: generate a prompt, write in a
+  live-word-count editor, submit, and see the overall band, four criterion
+  cards (band/why/evidence), inline errors, and top-3 next-band actions.
+
+### Calibration harness
+
+```bash
+npm run calibrate
+```
+
+Runs every `*.json` gold essay in `/calibration` through the same
+evaluation core the API uses and reports MAE + % within ±0.5 band (target
+≥85%) plus a per-criterion drift table. See `calibration/README.md` for the
+file format — the `_placeholder-*.json` files there are synthetic
+(`"synthetic": true`) and only prove the harness runs; replace them with
+real essays-with-known-official-bands for a real accuracy measurement.
+
 ## Docker
 
 ```bash

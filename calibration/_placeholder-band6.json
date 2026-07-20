@@ -1,0 +1,14 @@
+{
+  "id": "_placeholder-band6",
+  "synthetic": true,
+  "prompt": "Some people believe that automation and artificial intelligence will destroy more jobs than they create, while others believe new technology always generates new employment opportunities. Discuss both views and give your own opinion.",
+  "instructions": "You should spend about 40 minutes on this task and write at least 250 words.",
+  "essay": "Automation is a big topic in today's world. Some people think that machines and AI will take away many jobs from workers. Other people think that new technology always makes new jobs too. In this essay I will discuss both views before giving my opinion.\n\nOn one hand, automation can replace jobs that are repetitive, such as factory work or simple data entry. Many workers in these industries could lose their jobs because a machine can do the same task faster and cheaper. This is already happening in some countries where robots are used in car factories instead of humans.\n\nOn the other hand, new technology also creates jobs. For example, someone needs to build the robots, program the software, and fix the machines when they break. Also, new industries like app development or renewable energy did not exist before and now employ many people.\n\nIn my opinion, automation will change the type of jobs available rather than simply destroying employment overall. Governments should invest in education and training so workers can move into the new jobs that technology creates.\n\nIn conclusion, while automation removes some jobs, it also creates others, and the real challenge is helping people adapt to these changes.",
+  "official_bands": {
+    "task_response": 6.5,
+    "coherence_cohesion": 6.0,
+    "lexical_resource": 6.0,
+    "grammatical_range_accuracy": 6.5,
+    "overall": 6.5
+  }
+}

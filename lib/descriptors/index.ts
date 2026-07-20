@@ -1,10 +1,9 @@
 /**
- * Band descriptor knowledge base (Phase 1).
+ * Band descriptor knowledge base.
  *
- * Official IELTS band descriptors for all four Writing criteria
- * (TR/TA, CC, LR, GRA) and Speaking criteria (FC, LR, GRA, PR) will live
- * here as typed constants, alongside calibration examples. They are
- * injected verbatim into every scoring call's system prompt.
+ * Writing Task 2 descriptors (TR/CC/LR/GRA) live in ./writingTask2.ts.
+ * Speaking (FC/LR/GRA/PR) and Writing Task 1 descriptors are added in
+ * their respective phases.
  */
 
-export const DESCRIPTORS_PLACEHOLDER = true;
+export * from "./writingTask2";

@@ -127,3 +127,32 @@ export async function generate(
   );
   return responseText(response);
 }
+
+/**
+ * Coerces arbitrary free text into a target schema on the cheap Flash-Lite
+ * tier, temperature 0, no tools. Exists because the Gemini API cannot
+ * combine `tools` (e.g. Google Search grounding) with structured output in
+ * a single call — `generate()` gets the grounded free text, then this
+ * repairs/validates it into the exact shape callers need, instead of
+ * hand-rolling brittle text parsing.
+ */
+export async function structureFreeText<T>(
+  rawText: string,
+  schema: StructuredSchema<T>,
+): Promise<T> {
+  const { model, temperature } = GEMINI_ROUTING.precheck;
+  const response = await withRetry(() =>
+    getClient().models.generateContent({
+      model,
+      contents: `Extract and normalize the following content into the exact \
+structure required. Do not invent information that isn't present in the \
+source text below; only reformat it.\n\n---\n${rawText}\n---`,
+      config: {
+        temperature,
+        responseMimeType: "application/json",
+        responseJsonSchema: toResponseJsonSchema(schema),
+      },
+    }),
+  );
+  return parseStructuredResponse(responseText(response), schema);
+}

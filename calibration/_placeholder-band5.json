@@ -1,0 +1,14 @@
+{
+  "id": "_placeholder-band5",
+  "synthetic": true,
+  "prompt": "Some people believe that automation and artificial intelligence will destroy more jobs than they create, while others believe new technology always generates new employment opportunities. Discuss both views and give your own opinion.",
+  "instructions": "You should spend about 40 minutes on this task and write at least 250 words.",
+  "essay": "Nowadays technology is very important in the world. Some people think robot and AI will make people lose job. Other people think new technology make new job. I will talk about this in my essay.\n\nFirst reason is robot can do work of factory very fast. Many peoples in factory maybe lose their job because of this. This is big problem for the country and for family who need money.\n\nSecond reason is some people think new job will come. Like people who repair the computer or make the program for AI. This is also true because new company need workers too.\n\nIn my opinion I think both is true a little bit. Technology take some job but also give some job. Government need to help people learn new skill for new job in future.\n\nTo conclude, automation and AI have advantages and disadvantages for jobs in the world today.",
+  "official_bands": {
+    "task_response": 5.0,
+    "coherence_cohesion": 5.0,
+    "lexical_resource": 5.0,
+    "grammatical_range_accuracy": 5.0,
+    "overall": 5.0
+  }
+}
