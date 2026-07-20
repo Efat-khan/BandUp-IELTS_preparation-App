@@ -1,13 +1,191 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// BandUp data model (spec §11: users, questions, submissions, scores,
+// feedback, progress).
+//
+// Accuracy invariants encoded here:
+// - Score.score is the UNROUNDED sub-score (Decimal) — the officially
+//   rounded band is computed in lib/scoring and only ever DISPLAYED.
+// - Scores are stored per criterion per pass (double-pass scoring);
+//   disagreement between passes flags the submission instead of averaging.
+// - Every criterion score carries evidence quoted from the candidate's answer.
 
 generator client {
   provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  output   = "../lib/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+enum Module {
+  WRITING
+  SPEAKING
+}
+
+enum TaskType {
+  WRITING_TASK1_ACADEMIC
+  WRITING_TASK1_GENERAL
+  WRITING_TASK2
+  SPEAKING_PART1
+  SPEAKING_PART2
+  SPEAKING_PART3
+}
+
+// Writing: TR (Task Response/Achievement), CC, LR, GRA
+// Speaking: FC (Fluency & Coherence), LR, GRA, PR (Pronunciation)
+enum Criterion {
+  TR
+  CC
+  LR
+  GRA
+  FC
+  PR
+}
+
+enum QuestionSource {
+  SEED
+  GENERATED
+}
+
+enum SubmissionStatus {
+  PENDING
+  SCORING
+  SCORED
+  FLAGGED // double-pass disagreement — needs review before display
+  FAILED
+}
+
+enum FeedbackKind {
+  STRENGTHS
+  IMPROVEMENTS
+  REWRITE
+  EXAMINER_COMMENT
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  authProviderId String?  @unique // Clerk user id (wired in auth phase)
+  targetBand     Decimal? @db.Decimal(2, 1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  submissions Submission[]
+  progress    Progress[]
+
+  @@map("users")
+}
+
+model Question {
+  id        String         @id @default(cuid())
+  module    Module
+  taskType  TaskType
+  prompt    String
+  // Task 1 chart/diagram description or image reference
+  imageUrl  String?
+  topic     String?
+  source    QuestionSource @default(GENERATED)
+  // Pinned model ID that generated this question, null for seeds
+  modelId   String?
+  createdAt DateTime       @default(now())
+
+  submissions Submission[]
+
+  @@index([module, taskType])
+  @@map("questions")
+}
+
+model Submission {
+  id         String           @id @default(cuid())
+  userId     String
+  questionId String
+  module     Module
+  status     SubmissionStatus @default(PENDING)
+
+  // Writing
+  answerText String?
+  wordCount  Int?
+
+  // Speaking (later phase)
+  audioUrl        String?
+  transcript      String?
+  durationSeconds Int?
+
+  // Aggregate results — unrounded is authoritative; the display value is the
+  // officially rounded band, computed in code (lib/scoring), stored for audit.
+  overallUnrounded Decimal? @db.Decimal(5, 3)
+  overallBand      Decimal? @db.Decimal(2, 1)
+
+  // Deterministic guardrails applied in code
+  wordCountPenaltyApplied Boolean @default(false)
+  disagreementFlagged     Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question Question   @relation(fields: [questionId], references: [id])
+  scores   Score[]
+  feedback Feedback[]
+
+  @@index([userId, createdAt])
+  @@map("submissions")
+}
+
+model Score {
+  id           String    @id @default(cuid())
+  submissionId String
+  // Double-pass scoring: pass 1 and pass 2 rows per criterion
+  pass         Int       @default(1)
+  criterion    Criterion
+  // UNROUNDED sub-score as returned by the evaluator
+  score        Decimal   @db.Decimal(3, 1)
+  // Evidence quoted from the candidate's own answer + descriptor rationale
+  evidence     Json
+  // Pinned model ID that produced this score (audit trail)
+  modelId      String
+  createdAt    DateTime  @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, pass, criterion])
+  @@map("scores")
+}
+
+model Feedback {
+  id           String       @id @default(cuid())
+  submissionId String
+  // Null criterion = overall feedback
+  criterion    Criterion?
+  kind         FeedbackKind
+  content      String
+  createdAt    DateTime     @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@map("feedback")
+}
+
+model Progress {
+  id     String   @id @default(cuid())
+  userId String
+  module Module
+  // Daily rollup date (UTC midnight)
+  date   DateTime @db.Date
+
+  submissionsCount  Int      @default(0)
+  // Unrounded averages for trend charts
+  avgOverall        Decimal? @db.Decimal(5, 3)
+  // Per-criterion unrounded averages, keyed by Criterion
+  criterionAverages Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, module, date])
+  @@map("progress")
 }

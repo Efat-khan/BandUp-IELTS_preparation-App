@@ -90,6 +90,22 @@ export async function scoreWithSchema<T>(
 }
 
 /**
+ * Trivial liveness check on the cheapest tier (Flash-Lite, temperature 0).
+ * Used by /health; not part of the scoring/generation paths.
+ */
+export async function ping(): Promise<string> {
+  const { model, temperature } = GEMINI_ROUTING.precheck;
+  const response = await withRetry(() =>
+    getClient().models.generateContent({
+      model,
+      contents: "Reply with the single word: ok",
+      config: { temperature },
+    }),
+  );
+  return responseText(response);
+}
+
+/**
  * Generation call: Flash tier, temperature 0.9, Google Search grounding ON.
  * Returns free text (question prompts, sample answers, etc.).
  */
