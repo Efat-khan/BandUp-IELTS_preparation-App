@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { evaluateSpeakingSession } from "@/lib/scoring/evaluateSpeaking";
 import { persistSpeakingEvaluation } from "@/lib/scoring/persistSpeakingEvaluation";
+import { runPostSessionPipelineSafe } from "@/lib/teacher/postSession";
 import { mimeTypeForExtension } from "@/lib/speaking/audioFormat";
 import { LocalFilesystemStorageProvider, getStorageProvider } from "@/lib/storage/audioStorage";
 import type { TranscribedWord } from "@/lib/stt/transcribe";
@@ -131,8 +132,11 @@ async function handleScore(paramsPromise: Promise<{ id: string }>): Promise<Resp
     prisma.submission.update({ where: { id: part3Submission.id }, data: { status: "SCORED" } }),
   ]);
 
+  await runPostSessionPipelineSafe(part2Submission.id);
+
   return Response.json({
     sessionId,
+    submissionId: part2Submission.id,
     overallBand: outcome.overallBand,
     overallUnrounded: outcome.unroundedOverallBand,
     disagreementFlagged: outcome.disagreementFlagged,

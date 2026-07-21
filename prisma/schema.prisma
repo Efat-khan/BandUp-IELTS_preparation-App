@@ -109,6 +109,13 @@ model User {
   submissions Submission[]
   progress    Progress[]
 
+  learnerProfile   LearnerProfile?
+  errorLedger      ErrorLedgerEntry[]
+  sessionSummaries SessionSummary[]
+  studyPlan        StudyPlan?
+  miniLessons      MiniLesson[]
+  coachingMessages CoachingMessage[]
+
   @@map("users")
 }
 
@@ -227,6 +234,9 @@ model Submission {
   speakingSession SpeakingSession?    @relation(fields: [speakingSessionId], references: [id])
   scores          Score[]
   feedback        Feedback[]
+
+  sessionSummary   SessionSummary?
+  coachingMessages CoachingMessage[]
 
   @@index([userId, createdAt])
   @@index([mockSessionId])
@@ -367,4 +377,195 @@ model Progress {
 
   @@unique([userId, module, date])
   @@map("progress")
+}
+
+// ───────────────────────── Personal Teacher Layer ─────────────────────────
+// Two separate brains: the COLD SCORER (Score/Submission tables above,
+// temperature 0) produces bands; the WARM TEACHER below only ever PRESENTS
+// them. Nothing in these tables is ever an input to scoring.
+
+enum ErrorTrend {
+  IMPROVING
+  PERSISTENT
+  WORSENING
+}
+
+enum PlanUnitStatus {
+  PENDING
+  ACTIVE
+  MASTERED
+  INTERVENED // plateau detected — unit re-opened with a changed approach
+}
+
+enum CoachRole {
+  LEARNER
+  TUTOR
+}
+
+model LearnerProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  targetBand    Decimal?  @db.Decimal(2, 1)
+  examDate      DateTime? @db.Date
+  firstLanguage String?
+
+  // Latest per-criterion band estimates, keyed by "MODULE:CRITERION"
+  // (e.g. "WRITING:GRA") — recomputed from canonical scores after every
+  // session, never hand-edited by the teacher LLM.
+  criterionEstimates Json?
+
+  // The tutor's running prose picture of this learner (strengths, habits,
+  // preferences, recurring struggles) — rewritten by the profile
+  // summarizer after each session.
+  narrative String?
+
+  diagnosticCompletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("learner_profile")
+}
+
+model ErrorLedgerEntry {
+  id     String @id @default(cuid())
+  userId String
+
+  module    Module
+  criterion Criterion
+  // Stable machine key for the error family, e.g. "articles_missing",
+  // "comma_splice", "overgeneral_vocabulary" — the categorizer upserts on
+  // (userId, errorKey).
+  errorKey  String
+  // Human-readable label + a representative example from the learner's own work.
+  label     String
+  example   String?
+
+  occurrenceCount Int        @default(1)
+  // Occurrence counts per recent session, newest last — the trend is
+  // computed in code from this window, never guessed by the LLM.
+  recentCounts    Json?
+  trend           ErrorTrend @default(PERSISTENT)
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  miniLessons MiniLesson[]
+
+  @@unique([userId, errorKey])
+  @@index([userId, trend])
+  @@map("error_ledger")
+}
+
+model SessionSummary {
+  id           String  @id @default(cuid())
+  userId       String
+  submissionId String? @unique
+
+  module     Module
+  // Flash-written compact summary of what happened: what was attempted,
+  // what stood out, what the learner should remember.
+  summary    String
+  // Structured highlights the orchestrator can inject cheaply:
+  // { wins: string[], struggles: string[], next_focus: string }
+  highlights Json?
+
+  createdAt DateTime @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submission Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("session_summaries")
+}
+
+model StudyPlan {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // The tutor-voiced framing shown at the top of the plan view.
+  introduction String?
+  examDate     DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  units StudyPlanUnit[]
+
+  @@map("study_plan")
+}
+
+model StudyPlanUnit {
+  id     String @id @default(cuid())
+  planId String
+
+  position  Int
+  module    Module
+  criterion Criterion
+  title     String
+  // Why this unit is here and what mastering it unlocks — tutor voice.
+  rationale String
+  // Concrete practice actions, e.g. ["2 Task 2 drills focusing on X", ...]
+  actions   Json
+
+  status       PlanUnitStatus @default(PENDING)
+  // Band estimate for this unit's criterion at the time the unit was
+  // created/last resequenced — mastery is measured against this baseline.
+  baselineBand Decimal?       @db.Decimal(3, 1)
+  targetBand   Decimal?       @db.Decimal(3, 1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan        StudyPlan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  miniLessons MiniLesson[]
+
+  @@unique([planId, position])
+  @@map("study_plan_units")
+}
+
+model MiniLesson {
+  id            String  @id @default(cuid())
+  userId        String
+  // The persistent ledger error this lesson targets.
+  errorLedgerId String
+  planUnitId    String?
+
+  title   String
+  // Tutor-voiced lesson body (markdown): explanation, examples drawn from
+  // the learner's own errors, and a micro-exercise.
+  content String
+
+  createdAt DateTime @default(now())
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledgerEntry ErrorLedgerEntry @relation(fields: [errorLedgerId], references: [id], onDelete: Cascade)
+  planUnit    StudyPlanUnit?   @relation(fields: [planUnitId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("mini_lessons")
+}
+
+model CoachingMessage {
+  id           String  @id @default(cuid())
+  userId       String
+  // Optional anchor to the submission the learner is asking about.
+  submissionId String?
+
+  role    CoachRole
+  content String
+
+  createdAt DateTime @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submission Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([submissionId])
+  @@map("coaching_messages")
 }

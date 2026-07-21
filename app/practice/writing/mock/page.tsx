@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { ChartRenderer } from "@/components/ChartRenderer";
 import { EssayEditor } from "@/components/EssayEditor";
 import { ExamTimer } from "@/components/ExamTimer";
+import { TutorChat } from "@/components/TutorChat";
+import { TutorFeedback } from "@/components/TutorFeedback";
 import { WritingResultsView, type WritingResult } from "@/components/WritingResultsView";
 import type { ChartSpec } from "@/lib/gemini/schemas/chartSpec";
 
@@ -246,12 +248,16 @@ export default function WritingMockPage() {
 
             <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">Task 1</h2>
             {result.task1.criteria ? (
-              <WritingResultsView
-                title="Task 1 band"
-                essayText={task1Text}
-                questionPrompt={session.task1.prompt}
-                result={result.task1}
-              />
+              <>
+                <TutorFeedback submissionId={result.task1.submissionId} />
+                <WritingResultsView
+                  title="Task 1 band"
+                  essayText={task1Text}
+                  questionPrompt={session.task1.prompt}
+                  result={result.task1}
+                />
+                <TutorChat submissionId={result.task1.submissionId} title="Ask your tutor about Task 1" />
+              </>
             ) : (
               <p className="text-sm text-red-700 dark:text-red-400">
                 {result.task1.shortCircuitReason ?? "Task 1 could not be scored."}
@@ -260,12 +266,16 @@ export default function WritingMockPage() {
 
             <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">Task 2</h2>
             {result.task2.criteria ? (
-              <WritingResultsView
-                title="Task 2 band"
-                essayText={task2Text}
-                questionPrompt={session.task2.prompt}
-                result={result.task2}
-              />
+              <>
+                <TutorFeedback submissionId={result.task2.submissionId} />
+                <WritingResultsView
+                  title="Task 2 band"
+                  essayText={task2Text}
+                  questionPrompt={session.task2.prompt}
+                  result={result.task2}
+                />
+                <TutorChat submissionId={result.task2.submissionId} title="Ask your tutor about Task 2" />
+              </>
             ) : (
               <p className="text-sm text-red-700 dark:text-red-400">
                 {result.task2.shortCircuitReason ?? "Task 2 could not be scored."}

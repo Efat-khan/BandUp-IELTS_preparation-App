@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { ChartRenderer } from "@/components/ChartRenderer";
 import { EssayEditor } from "@/components/EssayEditor";
 import { ExamTimer } from "@/components/ExamTimer";
+import { TutorChat } from "@/components/TutorChat";
+import { TutorFeedback } from "@/components/TutorFeedback";
 import { WritingResultsView, type WritingResult } from "@/components/WritingResultsView";
 import type { ChartSpec } from "@/lib/gemini/schemas/chartSpec";
 
@@ -213,12 +215,16 @@ export default function Task1PracticePage() {
         )}
 
         {result && question && (
-          <WritingResultsView
-            title="Overall band"
-            essayText={essay}
-            questionPrompt={question.prompt}
-            result={result}
-          />
+          <>
+            <TutorFeedback submissionId={result.submissionId} />
+            <WritingResultsView
+              title="Overall band"
+              essayText={essay}
+              questionPrompt={question.prompt}
+              result={result}
+            />
+            <TutorChat submissionId={result.submissionId} />
+          </>
         )}
       </main>
     </div>

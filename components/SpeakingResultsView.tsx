@@ -35,6 +35,7 @@ export interface AcousticFeaturesResult {
 
 export interface SpeakingResult {
   sessionId: string;
+  submissionId: string;
   overallBand?: number;
   overallUnrounded?: number;
   disagreementFlagged: boolean;

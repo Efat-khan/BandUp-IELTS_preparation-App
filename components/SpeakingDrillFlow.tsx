@@ -4,6 +4,8 @@ import { useState } from "react";
 import { AudioRecorder } from "./AudioRecorder";
 import { FluencyTimeline } from "./FluencyTimeline";
 import { SpeechRateGauge } from "./SpeechRateGauge";
+import { TutorChat } from "./TutorChat";
+import { TutorFeedback } from "./TutorFeedback";
 import type {
   AcousticFeaturesResult,
   SpeakingCriterionResult,
@@ -74,9 +76,11 @@ function blobToBase64(blob: Blob): Promise<string> {
 interface SpeakingDrillFlowProps {
   /** When provided (e.g. from the weakness-drill route), skips the generate step entirely. */
   initialQuestion?: DrillQuestion;
+  /** Called with the scored submission's id once results arrive (e.g. so the diagnostic flow can hand it to /api/diagnostic/complete). */
+  onComplete?: (submissionId: string) => void;
 }
 
-export function SpeakingDrillFlow({ initialQuestion }: SpeakingDrillFlowProps) {
+export function SpeakingDrillFlow({ initialQuestion, onComplete }: SpeakingDrillFlowProps) {
   const [part, setPart] = useState<DrillPart>(initialQuestion?.part ?? "part2");
   const [question, setQuestion] = useState<DrillQuestion | null>(initialQuestion ?? null);
   const [generating, setGenerating] = useState(false);
@@ -115,6 +119,7 @@ export function SpeakingDrillFlow({ initialQuestion }: SpeakingDrillFlowProps) {
         mimeType,
       });
       setResult(data);
+      onComplete?.(data.submissionId);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scoring failed");
     } finally {
@@ -220,6 +225,7 @@ export function SpeakingDrillFlow({ initialQuestion }: SpeakingDrillFlowProps) {
 
       {result && question && (
         <section className="flex flex-col gap-6">
+          <TutorFeedback submissionId={result.submissionId} />
           <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
             <div className="flex items-baseline justify-between">
               <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
@@ -355,6 +361,8 @@ export function SpeakingDrillFlow({ initialQuestion }: SpeakingDrillFlowProps) {
               )}
             </div>
           )}
+
+          <TutorChat submissionId={result.submissionId} />
         </section>
       )}
     </div>

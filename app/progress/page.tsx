@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ProgressDashboard } from "@/components/ProgressDashboard";
+import { TutorGreeting } from "@/components/TutorGreeting";
 
 export default function ProgressPage() {
   return (
@@ -21,6 +22,7 @@ export default function ProgressPage() {
             ← Back to practice modes
           </Link>
         </header>
+        <TutorGreeting />
         <ProgressDashboard />
       </main>
     </div>

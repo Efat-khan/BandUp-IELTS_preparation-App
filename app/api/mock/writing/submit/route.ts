@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { evaluateWritingSubmission, type WritingTaskKind } from "@/lib/scoring/evaluateWriting";
 import { persistWritingEvaluation } from "@/lib/scoring/persistWritingEvaluation";
 import { combineWritingBand } from "@/lib/scoring/writingBand";
+import { runPostSessionPipelineSafe } from "@/lib/teacher/postSession";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,12 @@ async function handleSubmit(request: NextRequest): Promise<Response> {
       mockSessionId: session.id,
     }),
   ]);
+
+  for (const result of [task1Result, task2Result]) {
+    if (result.status !== "FAILED") {
+      await runPostSessionPipelineSafe(result.submissionId);
+    }
+  }
 
   let overallUnrounded: number | undefined;
   let overallBand: number | undefined;

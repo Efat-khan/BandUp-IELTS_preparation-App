@@ -33,4 +33,18 @@ export const GEMINI_ROUTING = {
     model: GEMINI_MODELS.precheck,
     temperature: 0,
   },
+  /**
+   * Warm-teacher voice (feedback humanizer, coaching chat, plan copy,
+   * mini-lessons): Flash, moderately warm. NEVER a scoring path — the
+   * teacher only presents bands the cold scorer already produced.
+   */
+  teacher: {
+    model: GEMINI_MODELS.generation,
+    temperature: 0.7,
+  },
+  /** Post-session analysis (session summarizer, error categorizer, profile narrative): Flash, near-deterministic — factual compression, not creative writing. */
+  teacherAnalysis: {
+    model: GEMINI_MODELS.generation,
+    temperature: 0.2,
+  },
 } as const;

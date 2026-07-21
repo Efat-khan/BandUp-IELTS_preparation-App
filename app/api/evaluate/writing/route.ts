@@ -3,6 +3,7 @@ import { resolveUserId } from "@/lib/demoUser";
 import { prisma } from "@/lib/db";
 import { evaluateWritingSubmission, type WritingTaskKind } from "@/lib/scoring/evaluateWriting";
 import { persistWritingEvaluation } from "@/lib/scoring/persistWritingEvaluation";
+import { runPostSessionPipelineSafe } from "@/lib/teacher/postSession";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,10 @@ async function handleEvaluate(request: NextRequest): Promise<Response> {
     questionId: question.id,
     answerText: body.text,
   });
+
+  if (result.status !== "FAILED") {
+    await runPostSessionPipelineSafe(result.submissionId);
+  }
 
   return Response.json(result, { status: outcome.shortCircuited ? 422 : 200 });
 }

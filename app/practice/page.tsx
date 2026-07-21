@@ -59,25 +59,51 @@ export default function PracticeHubPage() {
             Every question is generated fresh and de-duplicated against your recent history — you
             won&apos;t see the same topic twice in a row.
           </p>
-          <Link
-            href="/progress"
-            className="mt-2 inline-block text-sm text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-          >
-            View your progress dashboard →
-          </Link>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <Link
+              href="/progress"
+              className="text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            >
+              View your progress dashboard →
+            </Link>
+            <Link
+              href="/plan"
+              className="text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            >
+              View your study plan →
+            </Link>
+          </div>
         </header>
 
         <section className="flex flex-col gap-3 rounded-lg border border-violet-300 bg-violet-50 p-5 dark:border-violet-800 dark:bg-violet-950">
           <div className="flex flex-col gap-1">
-            <h2 className="font-semibold text-violet-900 dark:text-violet-200">Weakness drill</h2>
+            <h2 className="font-semibold text-violet-900 dark:text-violet-200">
+              New here? Start with your diagnostic
+            </h2>
             <p className="text-sm text-violet-800 dark:text-violet-300">
+              One Writing essay and one Speaking long turn — your tutor uses both to build your
+              first personal study plan.
+            </p>
+          </div>
+          <Link
+            href="/diagnostic"
+            className="w-fit rounded-full bg-violet-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-800 dark:bg-violet-600 dark:hover:bg-violet-500"
+          >
+            Start diagnostic
+          </Link>
+        </section>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-col gap-1">
+            <h2 className="font-semibold text-zinc-950 dark:text-zinc-50">Weakness drill</h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
               Automatically serves a task targeting your single lowest-scoring criterion across
               every scored attempt — Writing or Speaking, whichever needs it most.
             </p>
           </div>
           <Link
             href="/practice/weakness"
-            className="w-fit rounded-full bg-violet-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-800 dark:bg-violet-600 dark:hover:bg-violet-500"
+            className="w-fit rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
           >
             Start weakness drill
           </Link>

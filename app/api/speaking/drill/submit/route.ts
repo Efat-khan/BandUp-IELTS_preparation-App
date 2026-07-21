@@ -4,6 +4,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { resolveUserId } from "@/lib/demoUser";
 import { evaluateSpeakingSession } from "@/lib/scoring/evaluateSpeaking";
 import { persistSpeakingEvaluation } from "@/lib/scoring/persistSpeakingEvaluation";
+import { runPostSessionPipelineSafe } from "@/lib/teacher/postSession";
 import { extractAcousticFeatures } from "@/lib/speaking/acousticFeatures";
 import { extensionForMimeType } from "@/lib/speaking/audioFormat";
 import { getStorageProvider } from "@/lib/storage/audioStorage";
@@ -88,6 +89,7 @@ async function handleSubmit(request: NextRequest): Promise<Response> {
   });
 
   await persistSpeakingEvaluation(outcome, { canonicalSubmissionId: submission.id, userId });
+  await runPostSessionPipelineSafe(submission.id);
 
   return Response.json({
     submissionId: submission.id,

@@ -5,6 +5,8 @@ import { ChartRenderer } from "@/components/ChartRenderer";
 import { EssayEditor } from "@/components/EssayEditor";
 import { ExamTimer } from "@/components/ExamTimer";
 import { SpeakingDrillFlow, type DrillQuestion } from "@/components/SpeakingDrillFlow";
+import { TutorChat } from "@/components/TutorChat";
+import { TutorFeedback } from "@/components/TutorFeedback";
 import { WritingResultsView, type WritingResult } from "@/components/WritingResultsView";
 import type { ChartSpec } from "@/lib/gemini/schemas/chartSpec";
 
@@ -228,12 +230,16 @@ export default function WeaknessDrillPage() {
         )}
 
         {drill && drill.drillType !== "speaking_part2" && result && (
-          <WritingResultsView
-            title="Overall band"
-            essayText={essay}
-            questionPrompt={(drill.question as WritingDrillQuestion).prompt}
-            result={result}
-          />
+          <>
+            <TutorFeedback submissionId={result.submissionId} />
+            <WritingResultsView
+              title="Overall band"
+              essayText={essay}
+              questionPrompt={(drill.question as WritingDrillQuestion).prompt}
+              result={result}
+            />
+            <TutorChat submissionId={result.submissionId} />
+          </>
         )}
       </main>
     </div>

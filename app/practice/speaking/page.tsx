@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { SpeakingResultsView, type SpeakingResult } from "@/components/SpeakingResultsView";
+import { TutorChat } from "@/components/TutorChat";
+import { TutorFeedback } from "@/components/TutorFeedback";
 import type { TranscribedWord } from "@/lib/stt/transcribe";
 
 interface Part1Contract {
@@ -256,11 +258,15 @@ export default function SpeakingPracticePage() {
         )}
 
         {result && submissions.part2 && session && (
-          <SpeakingResultsView
-            result={result}
-            part2Words={submissions.part2.wordTimestamps}
-            part2QuestionId={session.part2.questionId}
-          />
+          <>
+            <TutorFeedback submissionId={result.submissionId} />
+            <SpeakingResultsView
+              result={result}
+              part2Words={submissions.part2.wordTimestamps}
+              part2QuestionId={session.part2.questionId}
+            />
+            <TutorChat submissionId={result.submissionId} />
+          </>
         )}
       </main>
     </div>

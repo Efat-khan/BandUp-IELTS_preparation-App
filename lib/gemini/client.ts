@@ -182,6 +182,72 @@ export async function rewriteParagraph(
 }
 
 /**
+ * Warm-teacher structured call (Flash, temperature 0.7) — feedback
+ * humanizing, plan copy, mini-lessons. Presentation only: bands in these
+ * outputs are echoes of DB values and are asserted unchanged in code
+ * (lib/teacher/orchestrator.ts) — this is never a scoring path.
+ */
+export async function teachWithSchema<T>(
+  systemPrompt: string,
+  userPrompt: string,
+  schema: StructuredSchema<T>,
+): Promise<T> {
+  const { model, temperature } = GEMINI_ROUTING.teacher;
+  const response = await withRetry(() =>
+    getClient().models.generateContent({
+      model,
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature,
+        responseMimeType: "application/json",
+        responseJsonSchema: toResponseJsonSchema(schema),
+      },
+    }),
+  );
+  return parseStructuredResponse(responseText(response), schema);
+}
+
+/** Warm-teacher free-text call (Flash, temperature 0.7) — the coaching chat. */
+export async function teachFreeText(systemPrompt: string, userPrompt: string): Promise<string> {
+  const { model, temperature } = GEMINI_ROUTING.teacher;
+  const response = await withRetry(() =>
+    getClient().models.generateContent({
+      model,
+      contents: userPrompt,
+      config: { systemInstruction: systemPrompt, temperature },
+    }),
+  );
+  return responseText(response);
+}
+
+/**
+ * Post-session analysis structured call (Flash, temperature 0.2) — session
+ * summarizer, error categorizer, profile narrative. Factual compression of
+ * what already happened; not learner-facing voice and not scoring.
+ */
+export async function analyzeWithSchema<T>(
+  systemPrompt: string,
+  userPrompt: string,
+  schema: StructuredSchema<T>,
+): Promise<T> {
+  const { model, temperature } = GEMINI_ROUTING.teacherAnalysis;
+  const response = await withRetry(() =>
+    getClient().models.generateContent({
+      model,
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature,
+        responseMimeType: "application/json",
+        responseJsonSchema: toResponseJsonSchema(schema),
+      },
+    }),
+  );
+  return parseStructuredResponse(responseText(response), schema);
+}
+
+/**
  * Coerces arbitrary free text into a target schema on the cheap Flash-Lite
  * tier, temperature 0, no tools. Exists because the Gemini API cannot
  * combine `tools` (e.g. Google Search grounding) with structured output in
