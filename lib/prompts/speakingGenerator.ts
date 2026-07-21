@@ -16,6 +16,9 @@ Rules:
 - Each topic gets 3-5 short, concrete questions that build naturally on \
 each other.
 - No specialist knowledge required to answer any question.
+- Never copy sentences or phrasing verbatim from anything you find via \
+search grounding — write every question entirely in your own original \
+words. Grounding is for topic currency only, not a source of text to reuse.
 - Respond with ONLY the JSON specified by the response schema — no \
 markdown, no commentary.`;
 }
@@ -49,6 +52,9 @@ event, or experience) and is concrete and personal, never abstract.
 where, who, how) — concrete prompts, not abstract questions.
 - final_prompt is a single closing sentence extending the topic, e.g. \
 "and explain why this person was memorable to you."
+- Never copy sentences or phrasing verbatim from anything you find via \
+search grounding — write the cue card entirely in your own original \
+words. Grounding is for topic currency only, not a source of text to reuse.
 - Respond with ONLY the JSON specified by the response schema — no \
 markdown, no commentary.`;
 }
@@ -83,6 +89,9 @@ you gave" to "how do gift-giving customs differ between cultures?").
 - Increase in complexity in a natural sequence.
 - Do not repeat the Part 2 cue card's question or ask for the same \
 personal example again.
+- Never copy sentences or phrasing verbatim from anything you find via \
+search grounding — write every question entirely in your own original \
+words. Grounding is for topic currency only, not a source of text to reuse.
 - Respond with ONLY the JSON specified by the response schema — no \
 markdown, no commentary.`;
 }

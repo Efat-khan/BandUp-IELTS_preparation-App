@@ -67,6 +67,24 @@ export const SPEAKING_DESCRIPTORS: Record<SpeakingCriterionId, SpeakingBandDescr
   },
 };
 
+/**
+ * Short illustrative anchor snippets per whole band — NOT verified official
+ * sample answers (the real gold-standard calibration set lives in
+ * /calibration and is what scripts/calibrate.ts measures against). These
+ * exist purely to give the evaluator a stylistic sense of spoken register
+ * (hesitation, self-correction, connective use) at each band; they should
+ * not be treated as ground truth. Same non-negotiable caveat as
+ * WRITING_TASK2_CALIBRATION_ANCHORS.
+ */
+export const SPEAKING_CALIBRATION_ANCHORS: Partial<Record<9 | 8 | 7 | 6 | 5 | 4, string>> = {
+  9: "Fluent with only content-driven pauses: 'What really struck me was how the whole neighbourhood rallied around it — not out of obligation, but because they'd genuinely come to see it as theirs.'",
+  8: "Fluent with rare self-correction: 'It was, well, probably the most demanding project I'd taken on — though looking back, the difficulty is exactly what made it worthwhile.'",
+  7: "Extended speech with occasional language-driven hesitation: 'I'd say it changed my — sorry, it changed the way I think about it, because before that I'd never really considered the other side.'",
+  6: "Willing to speak at length but coherence slips: 'So basically it was a good experience, I mean there were some hard parts too, but overall, yeah, I think it was good for me and for my, um, my confidence I guess.'",
+  5: "Maintains flow via repetition/slower speech: 'It was — it was quite difficult at first. Very difficult. But after some time, some time passed, I could do it better, slowly.'",
+  4: "Frequent pauses, limited connectives: 'I go to work. Then I go home. Then I am tired. I don't have much time for... for other things.'",
+};
+
 export function getSpeakingBandDescriptor(
   criterion: SpeakingCriterionId,
   wholeBand: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,

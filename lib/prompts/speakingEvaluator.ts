@@ -1,4 +1,5 @@
 import {
+  SPEAKING_CALIBRATION_ANCHORS,
   SPEAKING_CRITERION_NAMES,
   SPEAKING_DESCRIPTORS,
   type SpeakingCriterionId,
@@ -11,6 +12,14 @@ function renderDescriptorTable(criterion: SpeakingCriterionId): string {
   const bands = [9, 8, 7, 6, 5, 4, 3, 2, 1] as const;
   const lines = bands.filter((b) => table[b]).map((b) => `  Band ${b}: ${table[b]}`);
   return `${SPEAKING_CRITERION_NAMES[criterion]} (${criterion}):\n${lines.join("\n")}`;
+}
+
+function renderCalibrationAnchors(): string {
+  const bands = [9, 8, 7, 6, 5, 4] as const;
+  return bands
+    .filter((band) => SPEAKING_CALIBRATION_ANCHORS[band])
+    .map((band) => `  ~Band ${band}: ${SPEAKING_CALIBRATION_ANCHORS[band]}`)
+    .join("\n");
 }
 
 /**
@@ -33,6 +42,10 @@ descriptors below — never from general impression or instinct.
 Grammatical Range & Accuracy, Pronunciation)
 
 ${descriptorBlock}
+
+## Illustrative calibration anchors (spoken register/style only — not ground truth)
+
+${renderCalibrationAnchors()}
 
 ## Rules
 

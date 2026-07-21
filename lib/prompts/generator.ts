@@ -17,6 +17,9 @@ problem/solution, or two-part question.
 - Use current, real-world context where relevant (you have search \
 grounding — prefer topics with genuine present-day relevance over generic \
 recycled prompts) without requiring specialist knowledge to answer.
+- Never copy sentences or phrasing verbatim from anything you find via \
+search grounding — write the prompt entirely in your own original words. \
+Grounding is for topic currency only, not a source of text to reuse.
 - "instructions" must tell the candidate to spend about 40 minutes on this \
 task and write at least 250 words.
 - Keep the prompt to 2-4 sentences, in the standard IELTS register.
@@ -68,6 +71,9 @@ over time), "bar" (comparison across categories), "pie" (proportions — use \
 chart — it does not need to reflect real-world statistics, but the \
 numbers must be sensible and the trends must be clearly describable (no \
 lawless random noise).
+- Never copy sentences or phrasing verbatim from anything you find via \
+search grounding — write the prompt entirely in your own original words. \
+Grounding is for topic currency only, not a source of text or data to reuse.
 - "prompt" must read like the real exam, e.g. "The chart below shows ... \
 Summarize the information by selecting and reporting the main features, \
 and make comparisons where relevant." For process/map types, use \
@@ -110,6 +116,9 @@ complaint, a request, an invitation, an explanation, an apology).
 - "bullet_points" are exactly the 3-4 required points the letter must \
 cover (what the exam calls "In your letter: ..."), each a short \
 imperative phrase.
+- Never copy sentences or phrasing verbatim from anything you find via \
+search grounding — write the scenario entirely in your own original words. \
+Grounding is for topic currency only, not a source of text to reuse.
 - "instructions" must tell the candidate to spend about 20 minutes on this \
 task, write at least 150 words, and that they do not need to write \
 addresses.
