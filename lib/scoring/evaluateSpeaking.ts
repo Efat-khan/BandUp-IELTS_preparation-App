@@ -9,16 +9,24 @@ import {
   type TimestampedWord,
 } from "@/lib/speaking/acousticFeatures";
 import { resolvePronunciationBand, type PronunciationSource } from "@/lib/speaking/pronunciation";
-import type { SpeakingCriterionKey } from "@/lib/gemini/schemas/speakingEvaluation";
-import type { UpgradePhrase } from "@/lib/gemini/schemas/speakingEvaluation";
+import type {
+  SpeakingCriterionKey,
+  SpeakingEvaluation,
+  UpgradePhrase,
+} from "@/lib/gemini/schemas/speakingEvaluation";
 import { runSpeakingDoublePassScoring } from "./speakingDoublePass";
 import { combineTaskBand } from "./taskBand";
 
 /**
- * Core Speaking evaluation pipeline — holistic across all 3 parts (see
- * lib/prompts/speakingEvaluator.ts), unlike Writing's per-task scoring.
- * Contains no DB/HTTP concerns so it's directly unit-testable and reusable
- * from a future calibration harness.
+ * Core Speaking evaluation pipeline — holistic across whichever parts are
+ * provided (see lib/prompts/speakingEvaluator.ts), unlike Writing's
+ * per-task scoring. Contains no DB/HTTP concerns so it's directly
+ * unit-testable and reusable from a future calibration harness.
+ *
+ * Full mock: pass all three parts. Quick drill (a single Part 1/2/3
+ * recording scored on its own): pass just the one part present — the
+ * missing parts are noted to the evaluator as "not attempted" rather than
+ * silently treated as empty, and evidence is drawn only from what's real.
  */
 
 export type SpeakingCriterionId = "FC" | "LR" | "GRA" | "PR";
@@ -29,10 +37,11 @@ export interface SpeakingPartInput {
 }
 
 export interface SpeakingEvaluationInput {
-  cueCardTopic: string;
-  part1: SpeakingPartInput;
-  part2: SpeakingPartInput;
-  part3: SpeakingPartInput;
+  /** Only meaningful/known when Part 2 was attempted. */
+  cueCardTopic?: string;
+  part1?: SpeakingPartInput;
+  part2?: SpeakingPartInput;
+  part3?: SpeakingPartInput;
   /** Optional raw audio (typically Part 2's recording) for richer Pronunciation judgment. */
   audio?: { data: Buffer; mimeType: string };
 }
@@ -52,7 +61,14 @@ export interface SpeakingEvaluationOutcome {
   overallBand: number;
   modelSelfEstimatedBand: number;
   pronunciationSource: PronunciationSource;
-  acousticFeatures: { part1: AcousticFeatures; part2: AcousticFeatures; part3: AcousticFeatures };
+  acousticFeatures: {
+    part1: AcousticFeatures | null;
+    part2: AcousticFeatures | null;
+    part3: AcousticFeatures | null;
+  };
+  /** Raw double-pass audit trail — persisted as Score rows (pass 1/2) alongside the canonical pass 0. */
+  pass1: SpeakingEvaluation;
+  pass2: SpeakingEvaluation;
 }
 
 const CRITERION_KEY_MAP: Record<SpeakingCriterionId, SpeakingCriterionKey> = {
@@ -65,19 +81,26 @@ const CRITERION_KEY_MAP: Record<SpeakingCriterionId, SpeakingCriterionKey> = {
 export async function evaluateSpeakingSession(
   input: SpeakingEvaluationInput,
 ): Promise<SpeakingEvaluationOutcome> {
-  const part1Features = extractAcousticFeatures(input.part1.words);
-  const part2Features = extractAcousticFeatures(input.part2.words);
-  const part3Features = extractAcousticFeatures(input.part3.words);
+  if (!input.part1 && !input.part2 && !input.part3) {
+    throw new Error("At least one of part1, part2, or part3 must be provided");
+  }
+
+  const part1Features = input.part1 ? extractAcousticFeatures(input.part1.words) : null;
+  const part2Features = input.part2 ? extractAcousticFeatures(input.part2.words) : null;
+  const part3Features = input.part3 ? extractAcousticFeatures(input.part3.words) : null;
 
   const systemPrompt = buildSpeakingEvaluatorSystemPrompt(Boolean(input.audio));
   const userPrompt = buildSpeakingEvaluatorUserPrompt({
     cueCardTopic: input.cueCardTopic,
-    part1Transcript: input.part1.transcript,
-    part2Transcript: input.part2.transcript,
-    part3Transcript: input.part3.transcript,
-    part1MetricsSummary: formatAcousticFeaturesSummary(part1Features, "Part 1"),
-    part2MetricsSummary: formatAcousticFeaturesSummary(part2Features, "Part 2"),
-    part3MetricsSummary: formatAcousticFeaturesSummary(part3Features, "Part 3"),
+    part1: input.part1 && part1Features
+      ? { transcript: input.part1.transcript, metricsSummary: formatAcousticFeaturesSummary(part1Features, "Part 1") }
+      : undefined,
+    part2: input.part2 && part2Features
+      ? { transcript: input.part2.transcript, metricsSummary: formatAcousticFeaturesSummary(part2Features, "Part 2") }
+      : undefined,
+    part3: input.part3 && part3Features
+      ? { transcript: input.part3.transcript, metricsSummary: formatAcousticFeaturesSummary(part3Features, "Part 3") }
+      : undefined,
   });
 
   const doublePass = await runSpeakingDoublePassScoring(systemPrompt, userPrompt, input.audio ?? null);
@@ -97,7 +120,7 @@ export async function evaluateSpeakingSession(
   const pronunciation = await resolvePronunciationBand({
     llmPronunciationBand: criteria.PR.band,
     audio: input.audio,
-    referenceText: input.part2.transcript,
+    referenceText: input.part2?.transcript ?? input.part1?.transcript ?? input.part3?.transcript ?? "",
   });
   criteria.PR.band = pronunciation.band;
 
@@ -120,5 +143,7 @@ export async function evaluateSpeakingSession(
       (doublePass.pass1.estimated_overall_band + doublePass.pass2.estimated_overall_band) / 2,
     pronunciationSource: pronunciation.source,
     acousticFeatures: { part1: part1Features, part2: part2Features, part3: part3Features },
+    pass1: doublePass.pass1,
+    pass2: doublePass.pass2,
   };
 }

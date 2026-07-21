@@ -30,9 +30,14 @@ export function AudioRecorder({
   disabled,
 }: AudioRecorderProps) {
   const [phase, setPhase] = useState<Phase>("idle");
+  const [untimed, setUntimed] = useState(false);
   const [prepRemaining, setPrepRemaining] = useState(prepSeconds ?? 0);
   const [speakingElapsed, setSpeakingElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const effectivePrepSeconds = untimed ? 0 : prepSeconds;
+  const effectiveMaxSpeakingSeconds = untimed ? undefined : maxSpeakingSeconds;
+  const hasTimedControls = Boolean(prepSeconds || maxSpeakingSeconds);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -62,8 +67,8 @@ export function AudioRecorder({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      if (prepSeconds && prepSeconds > 0) {
-        setPrepRemaining(prepSeconds);
+      if (effectivePrepSeconds && effectivePrepSeconds > 0) {
+        setPrepRemaining(effectivePrepSeconds);
         setPhase("prep");
       } else {
         beginRecording(stream);
@@ -91,13 +96,13 @@ export function AudioRecorder({
 
   useEffect(() => {
     if (phase !== "recording") return;
-    if (maxSpeakingSeconds && speakingElapsed >= maxSpeakingSeconds) {
+    if (effectiveMaxSpeakingSeconds && speakingElapsed >= effectiveMaxSpeakingSeconds) {
       stopRecording();
       return;
     }
     const timeout = setTimeout(() => setSpeakingElapsed((s) => s + 1), 1000);
     return () => clearTimeout(timeout);
-  }, [phase, speakingElapsed, maxSpeakingSeconds]);
+  }, [phase, speakingElapsed, effectiveMaxSpeakingSeconds]);
 
   useEffect(() => {
     return () => {
@@ -107,6 +112,17 @@ export function AudioRecorder({
 
   return (
     <div className="flex flex-col gap-2">
+      {hasTimedControls && phase === "idle" && (
+        <label className="flex w-fit items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <input
+            type="checkbox"
+            checked={untimed}
+            onChange={(e) => setUntimed(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          Untimed practice (skip prep countdown, no auto-stop)
+        </label>
+      )}
       {phase === "idle" && (
         <button
           type="button"
@@ -126,7 +142,8 @@ export function AudioRecorder({
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400">
             <span className="h-2 w-2 animate-pulse rounded-full bg-red-600 dark:bg-red-400" />
-            Recording… {speakingElapsed}s{maxSpeakingSeconds ? ` / ${maxSpeakingSeconds}s` : ""}
+            Recording… {speakingElapsed}s
+            {effectiveMaxSpeakingSeconds ? ` / ${effectiveMaxSpeakingSeconds}s` : ""}
           </span>
           <button
             type="button"

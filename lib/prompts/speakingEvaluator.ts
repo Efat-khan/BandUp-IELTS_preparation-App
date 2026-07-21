@@ -16,17 +16,18 @@ function renderDescriptorTable(criterion: SpeakingCriterionId): string {
 /**
  * The evaluator NEVER scores from instinct: injects the full official
  * Speaking band descriptor set every scoring call (non-negotiable rule
- * #1, same as Writing). Speaking is scored holistically across all three
- * parts — one set of 4 criterion bands for the whole test, not a per-part
- * score.
+ * #1, same as Writing). A full mock is scored holistically across all
+ * three parts — one set of 4 criterion bands, not a per-part score. A
+ * quick drill (only some parts attempted) is scored the same way, just
+ * with a smaller evidence base — the prompt tells the model exactly which
+ * parts are missing so it never invents content for them.
  */
 export function buildSpeakingEvaluatorSystemPrompt(hasAudio: boolean): string {
   const descriptorBlock = CRITERIA_ORDER.map(renderDescriptorTable).join("\n\n");
 
   return `You are an IELTS Speaking examiner scoring a candidate's spoken \
-performance across Parts 1, 2, and 3 of the test. You score strictly \
-against the official IELTS Speaking band descriptors below — never from \
-general impression or instinct.
+performance. You score strictly against the official IELTS Speaking band \
+descriptors below — never from general impression or instinct.
 
 ## Official band descriptors (Fluency & Coherence, Lexical Resource, \
 Grammatical Range & Accuracy, Pronunciation)
@@ -36,18 +37,23 @@ ${descriptorBlock}
 ## Rules
 
 1. Score EACH of the four criteria independently, based on the candidate's \
-performance across ALL THREE parts together (this is a single holistic \
-Speaking band, not three separate part-scores).
+performance across whichever part(s) are provided below (this is a single \
+holistic Speaking band, not separate per-part scores). If only one or two \
+parts were attempted, that does not reduce the accuracy of what you can \
+observe from them — just note the smaller evidence base in "why" where \
+relevant.
 2. For every criterion, quote 1-4 short fragments taken VERBATIM from the \
-candidate's own transcript as evidence.
+candidate's own transcript as evidence. Never invent content for a part \
+that was not attempted.
 3. "why" must reference the specific descriptor language that justifies \
 the band awarded.
 4. Bands are always a whole or half band (e.g. 6.0, 6.5, 7.0) — never a \
 quarter fraction.
 5. You are given DETERMINISTIC ACOUSTIC METRICS computed in code (speech \
 rate, filled/silent pauses, mean length of run, self-corrections) for each \
-part — treat these as ground truth for Fluency & Coherence. Do not try to \
-recompute or contradict them; reason about what they imply instead.
+attempted part — treat these as ground truth for Fluency & Coherence. Do \
+not try to recompute or contradict them; reason about what they imply \
+instead.
 6. ${
     hasAudio
       ? "Raw audio for at least one part is provided — use it as the primary basis for Pronunciation (stress, intonation, individual sounds), which the transcript alone cannot reveal."
@@ -63,38 +69,41 @@ independent criterion scores.
 prose, no markdown, no commentary outside the schema fields.`;
 }
 
+interface SpeakingPartPromptInput {
+  transcript: string;
+  metricsSummary: string;
+}
+
 export function buildSpeakingEvaluatorUserPrompt(input: {
-  cueCardTopic: string;
-  part1Transcript: string;
-  part2Transcript: string;
-  part3Transcript: string;
-  part1MetricsSummary: string;
-  part2MetricsSummary: string;
-  part3MetricsSummary: string;
+  cueCardTopic?: string;
+  part1?: SpeakingPartPromptInput;
+  part2?: SpeakingPartPromptInput;
+  part3?: SpeakingPartPromptInput;
 }): string {
-  return `## Part 2 cue card topic
-${input.cueCardTopic}
+  const metricsLines = [input.part1, input.part2, input.part3]
+    .filter((p): p is SpeakingPartPromptInput => Boolean(p))
+    .map((p) => p.metricsSummary)
+    .join("\n");
 
-## Deterministic acoustic metrics (computed in code — treat as ground truth)
-${input.part1MetricsSummary}
-${input.part2MetricsSummary}
-${input.part3MetricsSummary}
+  const renderPart = (label: string, part?: SpeakingPartPromptInput): string =>
+    part
+      ? `## ${label} transcript\n"""\n${part.transcript}\n"""`
+      : `## ${label}\nNot attempted in this session.`;
 
-## Part 1 transcript
-"""
-${input.part1Transcript}
-"""
+  const cueCardBlock = input.cueCardTopic
+    ? `## Part 2 cue card topic\n${input.cueCardTopic}\n\n`
+    : "";
 
-## Part 2 transcript
-"""
-${input.part2Transcript}
-"""
+  return `${cueCardBlock}## Deterministic acoustic metrics (computed in code — treat as ground truth)
+${metricsLines}
 
-## Part 3 transcript
-"""
-${input.part3Transcript}
-"""
+${renderPart("Part 1", input.part1)}
 
-Score this candidate's overall Speaking performance across all three parts \
-against the four criteria and return the structured JSON response.`;
+${renderPart("Part 2", input.part2)}
+
+${renderPart("Part 3", input.part3)}
+
+Score this candidate's Speaking performance against the four criteria \
+based on whichever part(s) were attempted, and return the structured JSON \
+response.`;
 }

@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { GEMINI_MODELS } from "@/lib/gemini/models";
 import type { WritingCriterionKey } from "@/lib/gemini/schemas/writingEvaluation";
+import { updateProgress } from "@/lib/progress/updateProgress";
+import { EVALUATOR_VERSION } from "./evaluatorVersion";
 import type { ScoredCriterionId } from "./guardrails";
 import type { WritingEvaluationOutcome } from "./evaluateWriting";
 
@@ -17,6 +19,9 @@ export interface PersistWritingEvaluationInput {
   questionId: string;
   answerText: string;
   mockSessionId?: string;
+  timeSpentSeconds?: number;
+  /** Overrides the submission's createdAt (and thus its progress-rollup day) — used only by scripts/seedProgressDemo.ts to backfill realistic multi-day history through this real function. Omit to default to now, as every API route does. */
+  createdAt?: Date;
 }
 
 export interface PersistedCriterionResult {
@@ -64,6 +69,8 @@ export async function persistWritingEvaluation(
         answerText: input.answerText,
         wordCount: outcome.preCheck.wordCount,
         mockSessionId: input.mockSessionId,
+        timeSpentSeconds: input.timeSpentSeconds,
+        createdAt: input.createdAt,
       },
     });
     await prisma.feedback.create({
@@ -114,6 +121,8 @@ export async function persistWritingEvaluation(
       wordCountPenaltyApplied: criteria[primaryCriterion].wordCountPenaltyApplied,
       disagreementFlagged,
       mockSessionId: input.mockSessionId,
+      timeSpentSeconds: input.timeSpentSeconds,
+      createdAt: input.createdAt,
     },
   });
 
@@ -132,6 +141,7 @@ export async function persistWritingEvaluation(
         score: p1.band,
         evidence: { evidence: p1.evidence, why: p1.why },
         modelId: GEMINI_MODELS.scoring,
+        evaluatorVersion: EVALUATOR_VERSION,
       },
       {
         submissionId: submission.id,
@@ -140,6 +150,7 @@ export async function persistWritingEvaluation(
         score: p2.band,
         evidence: { evidence: p2.evidence, why: p2.why },
         modelId: GEMINI_MODELS.scoring,
+        evaluatorVersion: EVALUATOR_VERSION,
       },
       {
         submissionId: submission.id,
@@ -154,6 +165,7 @@ export async function persistWritingEvaluation(
           calibrationClamped: canonical.calibrationClamped,
         },
         modelId: GEMINI_MODELS.scoring,
+        evaluatorVersion: EVALUATOR_VERSION,
       },
     ];
   });
@@ -165,6 +177,12 @@ export async function persistWritingEvaluation(
       kind: "IMPROVEMENTS" as const,
       content: action,
     })),
+  });
+
+  await updateProgress({
+    userId: input.userId,
+    module: "WRITING",
+    date: submission.createdAt,
   });
 
   return {

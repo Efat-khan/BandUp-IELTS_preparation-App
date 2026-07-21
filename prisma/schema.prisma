@@ -206,6 +206,11 @@ model Submission {
   wordCountPenaltyApplied Boolean @default(false)
   disagreementFlagged     Boolean @default(false)
 
+  // Wall-clock time the candidate actually spent (writing elapsed time, or
+  // spoken audio duration for Speaking) — feeds the progress dashboard's
+  // "average time" metric. Reported by the client's exam timer.
+  timeSpentSeconds Int?
+
   // Set when this submission is one half of a timed Task1+Task2 mock
   // (see WritingMockSession) rather than a standalone practice submission.
   mockSessionId     String?
@@ -295,21 +300,25 @@ model SpeakingSession {
 }
 
 model Score {
-  id           String    @id @default(cuid())
-  submissionId String
+  id               String    @id @default(cuid())
+  submissionId     String
   // pass 1 and 2 are the raw double-pass LLM scoring calls (audit trail);
   // pass 0 is the canonical final score after averaging the two passes
   // and applying code guardrails (word-count cap, calibration ceiling) —
   // pass 0 is what overallUnrounded/overallBand are derived from.
-  pass         Int       @default(1)
-  criterion    Criterion
+  pass             Int       @default(1)
+  criterion        Criterion
   // UNROUNDED sub-score as returned by the evaluator
-  score        Decimal   @db.Decimal(3, 1)
+  score            Decimal   @db.Decimal(3, 1)
   // Evidence quoted from the candidate's own answer + descriptor rationale
-  evidence     Json
+  evidence         Json
   // Pinned model ID that produced this score (audit trail)
-  modelId      String
-  createdAt    DateTime  @default(now())
+  modelId          String
+  // Descriptor/prompt/schema version (lib/scoring/evaluatorVersion.ts) —
+  // bumped whenever the evaluator's scoring logic meaningfully changes.
+  // Progress trend lines only ever chart same-version scores together.
+  evaluatorVersion String
+  createdAt        DateTime  @default(now())
 
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
 
@@ -339,11 +348,17 @@ model Progress {
   // Daily rollup date (UTC midnight)
   date   DateTime @db.Date
 
-  submissionsCount  Int      @default(0)
+  submissionsCount    Int      @default(0)
   // Unrounded averages for trend charts
-  avgOverall        Decimal? @db.Decimal(5, 3)
+  avgOverall          Decimal? @db.Decimal(5, 3)
   // Per-criterion unrounded averages, keyed by Criterion
-  criterionAverages Json?
+  criterionAverages   Json?
+  // Average timeSpentSeconds across this day's submissions.
+  avgTimeSpentSeconds Int?
+  // The evaluatorVersion this day's rollup was computed from — a day with
+  // scores from multiple versions is stamped with the most recent one and
+  // may be excluded from a trend line pinned to an older version.
+  evaluatorVersion    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

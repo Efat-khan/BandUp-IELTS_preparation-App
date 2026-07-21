@@ -3,8 +3,12 @@
 import { useMemo, useState } from "react";
 import { ChartRenderer } from "@/components/ChartRenderer";
 import { EssayEditor } from "@/components/EssayEditor";
+import { ExamTimer } from "@/components/ExamTimer";
 import { WritingResultsView, type WritingResult } from "@/components/WritingResultsView";
 import type { ChartSpec } from "@/lib/gemini/schemas/chartSpec";
+
+/** IELTS Task 1 is exam-recommended at ~20 minutes. */
+const TASK1_DURATION_SECONDS = 20 * 60;
 
 type TestType = "academic" | "general";
 
@@ -132,6 +136,14 @@ export default function Task1PracticePage() {
               {generating ? "Generating…" : `Generate Task 1 (${testType === "academic" ? "Academic" : "General"})`}
             </button>
           </div>
+        )}
+
+        {question && !result && (
+          <ExamTimer
+            key={question.id}
+            durationSeconds={TASK1_DURATION_SECONDS}
+            onExpire={handleSubmit}
+          />
         )}
 
         {question && (

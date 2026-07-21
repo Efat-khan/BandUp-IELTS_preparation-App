@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { evaluateSpeakingSession } from "@/lib/scoring/evaluateSpeaking";
+import { persistSpeakingEvaluation } from "@/lib/scoring/persistSpeakingEvaluation";
 import { mimeTypeForExtension } from "@/lib/speaking/audioFormat";
 import { LocalFilesystemStorageProvider, getStorageProvider } from "@/lib/storage/audioStorage";
 import type { TranscribedWord } from "@/lib/stt/transcribe";
@@ -109,9 +110,24 @@ async function handleScore(paramsPromise: Promise<{ id: string }>): Promise<Resp
     },
   });
 
+  // Part 2 carries the canonical Score rows (audit trail + progress/weakness-drill queries);
+  // Part 1/3 stay as transcript/metrics records only.
+  const totalDurationSeconds =
+    (part1Submission.durationSeconds ?? 0) +
+    (part2Submission.durationSeconds ?? 0) +
+    (part3Submission.durationSeconds ?? 0);
+  await prisma.submission.update({
+    where: { id: part2Submission.id },
+    data: { timeSpentSeconds: totalDurationSeconds || null },
+  });
+
+  await persistSpeakingEvaluation(outcome, {
+    canonicalSubmissionId: part2Submission.id,
+    userId: session.userId,
+  });
+
   await Promise.all([
     prisma.submission.update({ where: { id: part1Submission.id }, data: { status: "SCORED" } }),
-    prisma.submission.update({ where: { id: part2Submission.id }, data: { status: "SCORED" } }),
     prisma.submission.update({ where: { id: part3Submission.id }, data: { status: "SCORED" } }),
   ]);
 

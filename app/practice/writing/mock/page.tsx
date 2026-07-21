@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChartRenderer } from "@/components/ChartRenderer";
 import { EssayEditor } from "@/components/EssayEditor";
+import { ExamTimer } from "@/components/ExamTimer";
 import { WritingResultsView, type WritingResult } from "@/components/WritingResultsView";
 import type { ChartSpec } from "@/lib/gemini/schemas/chartSpec";
 
@@ -54,16 +55,6 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return data;
 }
 
-function formatTime(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const s = Math.floor(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${m}:${s}`;
-}
-
 export default function WritingMockPage() {
   const [task1TestType, setTask1TestType] = useState<TestType>("academic");
   const [session, setSession] = useState<MockStartResponse | null>(null);
@@ -73,7 +64,6 @@ export default function WritingMockPage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<MockSubmitResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
   const task1WordCount = useMemo(() => countWords(task1Text), [task1Text]);
   const task2WordCount = useMemo(() => countWords(task2Text), [task2Text]);
@@ -95,32 +85,6 @@ export default function WritingMockPage() {
       setSubmitting(false);
     }
   }
-
-  // Keep a ref to the latest handleSubmit (with the latest typed text) so the
-  // interval's auto-submit-on-timeout never fires with a stale closure.
-  const handleSubmitRef = useRef(handleSubmit);
-  useEffect(() => {
-    handleSubmitRef.current = handleSubmit;
-  });
-
-  useEffect(() => {
-    if (!session || result) return;
-    const deadline = new Date(session.startedAt).getTime() + session.timeLimitSeconds * 1000;
-    let hasTriggeredSubmit = false;
-
-    const tick = () => {
-      const remaining = Math.max(0, Math.round((deadline - Date.now()) / 1000));
-      setRemainingSeconds(remaining);
-      if (remaining === 0 && !hasTriggeredSubmit) {
-        hasTriggeredSubmit = true;
-        void handleSubmitRef.current();
-      }
-    };
-
-    tick();
-    const intervalId = setInterval(tick, 1000);
-    return () => clearInterval(intervalId);
-  }, [session, result]);
 
   async function handleStart() {
     setStarting(true);
@@ -190,18 +154,12 @@ export default function WritingMockPage() {
 
         {session && !result && (
           <>
-            <div className="sticky top-4 z-10 flex items-center justify-between rounded-lg border border-zinc-200 bg-white/90 px-4 py-2 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
-              <span className="text-sm text-zinc-600 dark:text-zinc-400">Time remaining</span>
-              <span
-                className={`font-mono text-lg font-semibold ${
-                  remainingSeconds !== null && remainingSeconds < 300
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-zinc-900 dark:text-zinc-100"
-                }`}
-              >
-                {remainingSeconds !== null ? formatTime(remainingSeconds) : "--:--"}
-              </span>
-            </div>
+            <ExamTimer
+              key={session.sessionId}
+              durationSeconds={session.timeLimitSeconds}
+              startedAt={session.startedAt}
+              onExpire={handleSubmit}
+            />
 
             <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
               <h2 className="font-semibold text-zinc-950 dark:text-zinc-50">

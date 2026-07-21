@@ -2,8 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { EssayEditor } from "@/components/EssayEditor";
+import { ExamTimer } from "@/components/ExamTimer";
 import { WritingResultsView, type WritingResult } from "@/components/WritingResultsView";
 import type { QuestionGenerationContract } from "@/lib/gemini/schemas/question";
+
+/** IELTS Task 2 is exam-recommended at ~40 minutes. */
+const TASK2_DURATION_SECONDS = 40 * 60;
 
 interface GeneratedQuestion extends QuestionGenerationContract {
   id: string;
@@ -101,6 +105,14 @@ export default function WritingPracticePage() {
           >
             {generating ? "Generating…" : "Generate Task 2"}
           </button>
+        )}
+
+        {question && !result && (
+          <ExamTimer
+            key={question.id}
+            durationSeconds={TASK2_DURATION_SECONDS}
+            onExpire={handleSubmit}
+          />
         )}
 
         {question && (
