@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import type { Question } from "@/lib/generated/prisma/client";
 import { generate, structureFreeText } from "@/lib/gemini/client";
 import { GEMINI_MODELS } from "@/lib/gemini/models";
 import {
@@ -21,10 +22,44 @@ import {
   buildPart3GeneratorUserPrompt,
 } from "@/lib/prompts/speakingGenerator";
 import { computeQuestionDedupeHash, isDuplicateQuestion } from "@/lib/questions/dedupe";
+import { fetchRecentServedHistory, findPooledQuestion, recordServed } from "@/lib/questions/questionPool";
 
 const DIFFICULTY_MAP = { easy: "EASY", medium: "MEDIUM", hard: "HARD" } as const;
+const REVERSE_DIFFICULTY_MAP = { EASY: "easy", MEDIUM: "medium", HARD: "hard" } as const;
 const MAX_GENERATION_ATTEMPTS = 3;
 const DEDUPE_WINDOW = 20;
+
+/** Faithfully rebuilds a Part 1 contract from a persisted Question row — reused across users to skip a Gemini call. */
+function reconstructPart1Contract(row: Question): Part1Contract {
+  return {
+    skill: "speaking",
+    part: "part1",
+    topics: (row.part1Topics as unknown as Part1Contract["topics"]) ?? [],
+    difficulty: REVERSE_DIFFICULTY_MAP[row.difficulty],
+    instructions: row.instructions ?? "",
+  };
+}
+
+/** Faithfully rebuilds a Part 2 contract from a persisted Question row — reused across users to skip a Gemini call. */
+function reconstructPart2Contract(row: Question): Part2Contract {
+  const cueCardPoints = row.cueCardPoints as unknown as
+    | { bulletPoints: string[]; finalPrompt: string }
+    | null;
+  return {
+    skill: "speaking",
+    part: "part2",
+    topic_tag: row.topic ?? "",
+    difficulty: REVERSE_DIFFICULTY_MAP[row.difficulty],
+    cue_card_topic: row.prompt,
+    bullet_points: cueCardPoints?.bulletPoints ?? [],
+    final_prompt: cueCardPoints?.finalPrompt ?? "",
+    // Part 2 timing is always exactly 60s prep / 120s speaking (assemblePart2Contract never varies
+    // it), so the contract's literal-typed fields are hardcoded rather than read back from the row.
+    prep_seconds: 60,
+    speaking_seconds: 120,
+    instructions: row.instructions ?? "",
+  };
+}
 
 export interface SpeakingSessionQuestion<T> {
   questionId: string;
@@ -81,28 +116,32 @@ function part2DedupeHash(contract: Part2Contract): string {
   return computeQuestionDedupeHash(contract.topic_tag, contract.cue_card_topic);
 }
 
-/** Fetches this user's recent dedupe hashes + topic labels for a given Speaking part, for de-dup and "avoid" prompting. */
-async function fetchRecentSpeakingHistory(
-  userId: string,
-  taskType: "SPEAKING_PART1" | "SPEAKING_PART2",
-): Promise<{ hashes: string[]; avoidTopics: string[] }> {
-  const recent = await prisma.question.findMany({
-    where: { requestedByUserId: userId, taskType },
-    orderBy: { createdAt: "desc" },
-    take: DEDUPE_WINDOW,
-    select: { dedupeHash: true, topic: true },
-  });
-  return {
-    hashes: recent.map((q) => q.dedupeHash).filter((h): h is string => Boolean(h)),
-    avoidTopics: recent.map((q) => q.topic).filter((t): t is string => Boolean(t)),
-  };
+interface DedupedGeneration<T> {
+  contract: T;
+  hash: string;
+  /** Set when served from the shared pool instead of a fresh Gemini call — the caller reuses this row rather than creating a new one. */
+  pooledQuestionId?: string;
 }
 
 async function generatePart1WithDedupe(
   userId: string,
   difficulty?: "easy" | "medium" | "hard",
-): Promise<{ contract: Part1Contract; hash: string }> {
-  const { hashes, avoidTopics } = await fetchRecentSpeakingHistory(userId, "SPEAKING_PART1");
+): Promise<DedupedGeneration<Part1Contract>> {
+  const { hashes, topics: avoidTopics } = await fetchRecentServedHistory(
+    userId,
+    "SPEAKING_PART1",
+    DEDUPE_WINDOW,
+  );
+
+  const pooled = await findPooledQuestion({
+    taskType: "SPEAKING_PART1",
+    excludeHashes: hashes,
+    difficulty: difficulty ? DIFFICULTY_MAP[difficulty] : undefined,
+  });
+  if (pooled && pooled.dedupeHash) {
+    return { contract: reconstructPart1Contract(pooled), hash: pooled.dedupeHash, pooledQuestionId: pooled.id };
+  }
+
   let contract: Part1Contract | null = null;
   let hash = "";
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
@@ -122,8 +161,22 @@ async function generatePart1WithDedupe(
 async function generatePart2WithDedupe(
   userId: string,
   difficulty?: "easy" | "medium" | "hard",
-): Promise<{ contract: Part2Contract; hash: string }> {
-  const { hashes, avoidTopics } = await fetchRecentSpeakingHistory(userId, "SPEAKING_PART2");
+): Promise<DedupedGeneration<Part2Contract>> {
+  const { hashes, topics: avoidTopics } = await fetchRecentServedHistory(
+    userId,
+    "SPEAKING_PART2",
+    DEDUPE_WINDOW,
+  );
+
+  const pooled = await findPooledQuestion({
+    taskType: "SPEAKING_PART2",
+    excludeHashes: hashes,
+    difficulty: difficulty ? DIFFICULTY_MAP[difficulty] : undefined,
+  });
+  if (pooled && pooled.dedupeHash) {
+    return { contract: reconstructPart2Contract(pooled), hash: pooled.dedupeHash, pooledQuestionId: pooled.id };
+  }
+
   let contract: Part2Contract | null = null;
   let hash = "";
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
@@ -140,6 +193,66 @@ async function generatePart2WithDedupe(
   return { contract, hash };
 }
 
+/** Reuses the pooled row if present (recording it as served to this user), otherwise creates a fresh Part 1 Question row. */
+async function getOrCreatePart1Question(
+  userId: string,
+  generated: DedupedGeneration<Part1Contract>,
+): Promise<string> {
+  if (generated.pooledQuestionId) {
+    await recordServed(userId, generated.pooledQuestionId);
+    return generated.pooledQuestionId;
+  }
+  const question = await prisma.question.create({
+    data: {
+      module: "SPEAKING",
+      taskType: "SPEAKING_PART1",
+      prompt: generated.contract.topics.map((t) => t.topic).join(", "),
+      difficulty: DIFFICULTY_MAP[generated.contract.difficulty],
+      instructions: generated.contract.instructions,
+      part1Topics: generated.contract.topics,
+      dedupeHash: generated.hash,
+      requestedByUserId: userId,
+      source: "GENERATED",
+      modelId: GEMINI_MODELS.generation,
+    },
+  });
+  await recordServed(userId, question.id);
+  return question.id;
+}
+
+/** Reuses the pooled row if present (recording it as served to this user), otherwise creates a fresh Part 2 Question row. */
+async function getOrCreatePart2Question(
+  userId: string,
+  generated: DedupedGeneration<Part2Contract>,
+): Promise<string> {
+  if (generated.pooledQuestionId) {
+    await recordServed(userId, generated.pooledQuestionId);
+    return generated.pooledQuestionId;
+  }
+  const question = await prisma.question.create({
+    data: {
+      module: "SPEAKING",
+      taskType: "SPEAKING_PART2",
+      prompt: generated.contract.cue_card_topic,
+      topic: generated.contract.topic_tag,
+      difficulty: DIFFICULTY_MAP[generated.contract.difficulty],
+      instructions: generated.contract.instructions,
+      cueCardPoints: {
+        bulletPoints: generated.contract.bullet_points,
+        finalPrompt: generated.contract.final_prompt,
+      },
+      prepSeconds: generated.contract.prep_seconds,
+      speakingSeconds: generated.contract.speaking_seconds,
+      dedupeHash: generated.hash,
+      requestedByUserId: userId,
+      source: "GENERATED",
+      modelId: GEMINI_MODELS.generation,
+    },
+  });
+  await recordServed(userId, question.id);
+  return question.id;
+}
+
 /**
  * Generates a full Speaking test (Part 1 + Part 2 cue card + Part 3
  * follow-ups tied to Part 2) and persists all three as Question rows plus
@@ -151,45 +264,17 @@ export async function generateSpeakingSession(
   userId: string,
   difficulty?: "easy" | "medium" | "hard",
 ): Promise<GeneratedSpeakingSession> {
-  const [{ contract: part1Contract, hash: part1Hash }, { contract: part2Contract, hash: part2Hash }] =
-    await Promise.all([
-      generatePart1WithDedupe(userId, difficulty),
-      generatePart2WithDedupe(userId, difficulty),
-    ]);
+  const [part1Generated, part2Generated] = await Promise.all([
+    generatePart1WithDedupe(userId, difficulty),
+    generatePart2WithDedupe(userId, difficulty),
+  ]);
+  const part1Contract = part1Generated.contract;
+  const part2Contract = part2Generated.contract;
   const part3Contract = await generatePart3(part2Contract);
 
-  const [part1Question, part2Question, part3Question] = await Promise.all([
-    prisma.question.create({
-      data: {
-        module: "SPEAKING",
-        taskType: "SPEAKING_PART1",
-        prompt: part1Contract.topics.map((t) => t.topic).join(", "),
-        difficulty: DIFFICULTY_MAP[part1Contract.difficulty],
-        instructions: part1Contract.instructions,
-        part1Topics: part1Contract.topics,
-        dedupeHash: part1Hash,
-        requestedByUserId: userId,
-        source: "GENERATED",
-        modelId: GEMINI_MODELS.generation,
-      },
-    }),
-    prisma.question.create({
-      data: {
-        module: "SPEAKING",
-        taskType: "SPEAKING_PART2",
-        prompt: part2Contract.cue_card_topic,
-        topic: part2Contract.topic_tag,
-        difficulty: DIFFICULTY_MAP[part2Contract.difficulty],
-        instructions: part2Contract.instructions,
-        cueCardPoints: { bulletPoints: part2Contract.bullet_points, finalPrompt: part2Contract.final_prompt },
-        prepSeconds: part2Contract.prep_seconds,
-        speakingSeconds: part2Contract.speaking_seconds,
-        dedupeHash: part2Hash,
-        requestedByUserId: userId,
-        source: "GENERATED",
-        modelId: GEMINI_MODELS.generation,
-      },
-    }),
+  const [part1QuestionId, part2QuestionId, part3Question] = await Promise.all([
+    getOrCreatePart1Question(userId, part1Generated),
+    getOrCreatePart2Question(userId, part2Generated),
     prisma.question.create({
       data: {
         module: "SPEAKING",
@@ -207,16 +292,16 @@ export async function generateSpeakingSession(
   const session = await prisma.speakingSession.create({
     data: {
       userId,
-      part1QuestionId: part1Question.id,
-      part2QuestionId: part2Question.id,
+      part1QuestionId,
+      part2QuestionId,
       part3QuestionId: part3Question.id,
     },
   });
 
   return {
     sessionId: session.id,
-    part1: { questionId: part1Question.id, contract: part1Contract },
-    part2: { questionId: part2Question.id, contract: part2Contract },
+    part1: { questionId: part1QuestionId, contract: part1Contract },
+    part2: { questionId: part2QuestionId, contract: part2Contract },
     part3: { questionId: part3Question.id, contract: part3Contract },
   };
 }
@@ -235,41 +320,12 @@ export async function generateSpeakingDrillQuestion(
   difficulty?: "easy" | "medium" | "hard",
 ): Promise<SpeakingSessionQuestion<Part1Contract | Part2Contract>> {
   if (part === "part1") {
-    const { contract, hash } = await generatePart1WithDedupe(userId, difficulty);
-    const question = await prisma.question.create({
-      data: {
-        module: "SPEAKING",
-        taskType: "SPEAKING_PART1",
-        prompt: contract.topics.map((t) => t.topic).join(", "),
-        difficulty: DIFFICULTY_MAP[contract.difficulty],
-        instructions: contract.instructions,
-        part1Topics: contract.topics,
-        dedupeHash: hash,
-        requestedByUserId: userId,
-        source: "GENERATED",
-        modelId: GEMINI_MODELS.generation,
-      },
-    });
-    return { questionId: question.id, contract };
+    const generated = await generatePart1WithDedupe(userId, difficulty);
+    const questionId = await getOrCreatePart1Question(userId, generated);
+    return { questionId, contract: generated.contract };
   }
 
-  const { contract, hash } = await generatePart2WithDedupe(userId, difficulty);
-  const question = await prisma.question.create({
-    data: {
-      module: "SPEAKING",
-      taskType: "SPEAKING_PART2",
-      prompt: contract.cue_card_topic,
-      topic: contract.topic_tag,
-      difficulty: DIFFICULTY_MAP[contract.difficulty],
-      instructions: contract.instructions,
-      cueCardPoints: { bulletPoints: contract.bullet_points, finalPrompt: contract.final_prompt },
-      prepSeconds: contract.prep_seconds,
-      speakingSeconds: contract.speaking_seconds,
-      dedupeHash: hash,
-      requestedByUserId: userId,
-      source: "GENERATED",
-      modelId: GEMINI_MODELS.generation,
-    },
-  });
-  return { questionId: question.id, contract };
+  const generated = await generatePart2WithDedupe(userId, difficulty);
+  const questionId = await getOrCreatePart2Question(userId, generated);
+  return { questionId, contract: generated.contract };
 }

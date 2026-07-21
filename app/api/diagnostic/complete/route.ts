@@ -2,7 +2,9 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/demoUser";
 import { teachFreeText } from "@/lib/gemini/client";
+import { errorResponse } from "@/lib/http/errorResponse";
 import { buildDiagnosticDebriefUserPrompt, TUTOR_SYSTEM_PROMPT } from "@/lib/prompts/tutor";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import { generateStudyPlan } from "@/lib/teacher/studyPlan";
 import { loadTeacherContext } from "@/lib/teacher/orchestrator";
 import { buildSessionFacts } from "@/lib/teacher/sessionFacts";
@@ -23,6 +25,8 @@ interface DiagnosticCompleteRequestBody {
  */
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.generation, request);
+    if (limited) return limited;
     let body: DiagnosticCompleteRequestBody;
     try {
       body = (await request.json()) as DiagnosticCompleteRequestBody;
@@ -50,19 +54,16 @@ export async function POST(request: NextRequest) {
       buildSessionFacts(body.speakingSubmissionId),
     ]);
 
-    const debrief = await teachFreeText(
-      TUTOR_SYSTEM_PROMPT,
-      buildDiagnosticDebriefUserPrompt(ctx, writingFacts, speakingFacts),
-    );
+    // The debrief text and the study plan don't depend on each other's
+    // output, so the two Flash calls run in parallel (cost/latency control).
+    const [debrief, planId] = await Promise.all([
+      teachFreeText(TUTOR_SYSTEM_PROMPT, buildDiagnosticDebriefUserPrompt(ctx, writingFacts, speakingFacts)),
+      generateStudyPlan(userId),
+    ]);
     await prisma.coachingMessage.create({ data: { userId, role: "TUTOR", content: debrief } });
-
-    const planId = await generateStudyPlan(userId);
 
     return Response.json({ debrief, planId });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }

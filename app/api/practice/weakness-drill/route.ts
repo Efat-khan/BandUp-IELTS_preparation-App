@@ -1,7 +1,9 @@
 import type { NextRequest } from "next/server";
 import { resolveUserId } from "@/lib/demoUser";
+import { errorResponse } from "@/lib/http/errorResponse";
 import { findWeakestCriterion } from "@/lib/progress/weaknessDrill";
 import { generateAndPersistQuestion } from "@/lib/questions/generateQuestion";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import { generateSpeakingDrillQuestion } from "@/lib/speaking/generateSpeakingSession";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,8 @@ async function parseBody(request: NextRequest): Promise<WeaknessDrillRequestBody
 
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.generation, request);
+    if (limited) return limited;
     const body = await parseBody(request);
     const userId = await resolveUserId(body.userId);
 
@@ -57,9 +61,6 @@ export async function POST(request: NextRequest) {
       question: { id: result.questionId, ...result.contract, deduped_retry: result.wasDeduped },
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }

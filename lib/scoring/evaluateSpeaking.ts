@@ -57,6 +57,7 @@ export interface SpeakingEvaluationOutcome {
   criteria: Record<SpeakingCriterionId, SpeakingCriterionOutcome>;
   upgradePhrases: UpgradePhrase[];
   disagreementFlagged: boolean;
+  thirdPassTriggered: boolean;
   unroundedOverallBand: number;
   overallBand: number;
   modelSelfEstimatedBand: number;
@@ -66,9 +67,11 @@ export interface SpeakingEvaluationOutcome {
     part2: AcousticFeatures | null;
     part3: AcousticFeatures | null;
   };
-  /** Raw double-pass audit trail — persisted as Score rows (pass 1/2) alongside the canonical pass 0. */
+  /** Raw multi-pass audit trail — persisted as Score rows (pass 1/2/3) alongside the canonical pass 0. */
   pass1: SpeakingEvaluation;
   pass2: SpeakingEvaluation;
+  /** Present only when pass1/pass2 diverged by more than THIRD_PASS_TOLERANCE on some criterion (spec §10.4). */
+  pass3?: SpeakingEvaluation;
 }
 
 const CRITERION_KEY_MAP: Record<SpeakingCriterionId, SpeakingCriterionKey> = {
@@ -133,17 +136,24 @@ export async function evaluateSpeakingSession(
     criteria.PR.band,
   );
 
+  const estimatedBands = [
+    doublePass.pass1.estimated_overall_band,
+    doublePass.pass2.estimated_overall_band,
+    ...(doublePass.pass3 ? [doublePass.pass3.estimated_overall_band] : []),
+  ];
+
   return {
     criteria,
     upgradePhrases: doublePass.pass1.upgrade_phrases,
     disagreementFlagged: doublePass.disagreementFlagged,
+    thirdPassTriggered: doublePass.thirdPassTriggered,
     unroundedOverallBand: unrounded,
     overallBand: band,
-    modelSelfEstimatedBand:
-      (doublePass.pass1.estimated_overall_band + doublePass.pass2.estimated_overall_band) / 2,
+    modelSelfEstimatedBand: estimatedBands.reduce((a, b) => a + b, 0) / estimatedBands.length,
     pronunciationSource: pronunciation.source,
     acousticFeatures: { part1: part1Features, part2: part2Features, part3: part3Features },
     pass1: doublePass.pass1,
+    pass3: doublePass.pass3,
     pass2: doublePass.pass2,
   };
 }

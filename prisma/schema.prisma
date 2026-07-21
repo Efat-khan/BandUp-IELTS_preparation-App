@@ -115,6 +115,7 @@ model User {
   studyPlan        StudyPlan?
   miniLessons      MiniLesson[]
   coachingMessages CoachingMessage[]
+  questionsServed  QuestionServed[]
 
   @@map("users")
 }
@@ -167,10 +168,31 @@ model Question {
   speakingPart1Sessions SpeakingSession[]    @relation("SpeakingPart1Question")
   speakingPart2Sessions SpeakingSession[]    @relation("SpeakingPart2Question")
   speakingPart3Sessions SpeakingSession[]    @relation("SpeakingPart3Question")
+  servedTo              QuestionServed[]
 
   @@index([module, taskType])
   @@index([requestedByUserId, module, taskType, createdAt])
   @@map("questions")
+}
+
+// Every time a question (freshly generated OR reused from the shared pool)
+// is handed to a user, one row lands here. Per-user de-dup windows read
+// THIS table, not Question.requestedByUserId — decoupling "who caused the
+// original Gemini generation call" from "who has seen it" is what lets a
+// question generated for one user be safely served to a different user
+// later without either user ever seeing a repeat of their own.
+model QuestionServed {
+  id         String   @id @default(cuid())
+  userId     String
+  questionId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, questionId])
+  @@index([questionId])
+  @@map("question_served")
 }
 
 model Submission {

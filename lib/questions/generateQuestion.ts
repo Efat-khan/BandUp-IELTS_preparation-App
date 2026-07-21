@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
+import type { Question } from "@/lib/generated/prisma/client";
 import { generate, structureFreeText } from "@/lib/gemini/client";
 import { GEMINI_MODELS } from "@/lib/gemini/models";
+import type { ChartSpec } from "@/lib/gemini/schemas/chartSpec";
 import {
   assembleQuestionContract,
   QuestionGenerationLLMSchema,
@@ -25,11 +27,17 @@ import {
   buildTask2GeneratorUserPrompt,
 } from "@/lib/prompts/generator";
 import { computeQuestionDedupeHash, isDuplicateQuestion } from "./dedupe";
+import { fetchRecentServedHistory, findPooledQuestion, recordServed } from "./questionPool";
 
 /**
  * Shared question generation + de-dup + persistence, used by both the
  * standalone /api/questions/generate route and /api/mock/writing/start
  * (which generates a Task1+Task2 pair for one timed mock).
+ *
+ * Cost control (Phase 5 §2): before calling Gemini, first checks the
+ * shared pool of already-generated questions (lib/questions/questionPool.ts)
+ * for one this user hasn't seen recently — reusing it skips generation
+ * entirely. Only generates fresh when the pool has nothing eligible.
  */
 
 export type QuestionTaskType = "task1_academic" | "task1_general" | "task2";
@@ -44,10 +52,16 @@ export const PRISMA_TASK_TYPE: Record<
 };
 
 const DIFFICULTY_MAP = { easy: "EASY", medium: "MEDIUM", hard: "HARD" } as const;
+const REVERSE_DIFFICULTY_MAP = { EASY: "easy", MEDIUM: "medium", HARD: "hard" } as const;
 const REGISTER_MAP = {
   formal: "FORMAL",
   semi_formal: "SEMI_FORMAL",
   informal: "INFORMAL",
+} as const;
+const REVERSE_REGISTER_MAP = {
+  FORMAL: "formal",
+  SEMI_FORMAL: "semi_formal",
+  INFORMAL: "informal",
 } as const;
 
 const MAX_GENERATION_ATTEMPTS = 3;
@@ -64,6 +78,56 @@ export interface GenerateQuestionInput {
   testType?: "academic" | "general";
   difficulty?: "easy" | "medium" | "hard";
   register?: "formal" | "semi_formal" | "informal";
+}
+
+/** Faithfully rebuilds a generation contract from a persisted Question row — every field the contract needs was already stored, so no data is lost by skipping Gemini. */
+export function reconstructWritingContract(row: Question): GeneratedContract {
+  const difficulty = REVERSE_DIFFICULTY_MAP[row.difficulty];
+  const topic_tag = row.topic ?? "";
+  const instructions = row.instructions ?? "";
+
+  if (row.taskType === "WRITING_TASK2") {
+    return {
+      skill: "writing",
+      task: "task2",
+      test_type: row.testType === "GENERAL" ? "general" : "academic",
+      topic_tag,
+      difficulty,
+      prompt: row.prompt,
+      instructions,
+      expected_word_count: 250,
+      time_limit_seconds: 2400,
+    };
+  }
+
+  if (row.taskType === "WRITING_TASK1_ACADEMIC") {
+    return {
+      skill: "writing",
+      task: "task1",
+      test_type: "academic",
+      topic_tag,
+      difficulty,
+      chart_spec: row.chartSpec as unknown as ChartSpec,
+      prompt: row.prompt,
+      instructions,
+      expected_word_count: 150,
+      time_limit_seconds: 1200,
+    };
+  }
+
+  // WRITING_TASK1_GENERAL
+  return {
+    skill: "writing",
+    task: "task1",
+    test_type: "general",
+    topic_tag,
+    difficulty,
+    register: REVERSE_REGISTER_MAP[row.letterRegister ?? "FORMAL"],
+    prompt: row.prompt,
+    instructions,
+    expected_word_count: 150,
+    time_limit_seconds: 1200,
+  };
 }
 
 async function generateCandidate(
@@ -113,6 +177,8 @@ export interface GeneratedQuestionResult {
   contract: GeneratedContract;
   questionId: string;
   wasDeduped: boolean;
+  /** True when served from the shared pool — no Gemini generation call was made. */
+  servedFromPool: boolean;
 }
 
 export async function generateAndPersistQuestion(
@@ -120,19 +186,34 @@ export async function generateAndPersistQuestion(
 ): Promise<GeneratedQuestionResult> {
   const prismaTaskType = PRISMA_TASK_TYPE[input.taskType];
 
-  const recentQuestions = await prisma.question.findMany({
-    where: { requestedByUserId: input.userId, taskType: prismaTaskType },
-    orderBy: { createdAt: "desc" },
-    take: DEDUPE_WINDOW,
-    select: { dedupeHash: true, topic: true },
-  });
-  const recentHashes = recentQuestions
-    .map((q) => q.dedupeHash)
-    .filter((h): h is string => Boolean(h));
-  const avoidTopics = recentQuestions
-    .map((q) => q.topic)
-    .filter((t): t is string => Boolean(t));
+  const { hashes: recentHashes, topics: recentTopics } = await fetchRecentServedHistory(
+    input.userId,
+    prismaTaskType,
+    DEDUPE_WINDOW,
+  );
 
+  const pooled = await findPooledQuestion({
+    taskType: prismaTaskType,
+    excludeHashes: recentHashes,
+    testType:
+      input.taskType === "task2"
+        ? input.testType === "general"
+          ? "GENERAL"
+          : "ACADEMIC"
+        : undefined,
+    difficulty: input.difficulty ? DIFFICULTY_MAP[input.difficulty] : undefined,
+  });
+  if (pooled) {
+    await recordServed(input.userId, pooled.id);
+    return {
+      contract: reconstructWritingContract(pooled),
+      questionId: pooled.id,
+      wasDeduped: false,
+      servedFromPool: true,
+    };
+  }
+
+  const avoidTopics = [...recentTopics];
   let contract: GeneratedContract | null = null;
   let dedupeHash = "";
   let wasDeduped = false;
@@ -172,6 +253,7 @@ export async function generateAndPersistQuestion(
       modelId: GEMINI_MODELS.generation,
     },
   });
+  await recordServed(input.userId, question.id);
 
-  return { contract, questionId: question.id, wasDeduped };
+  return { contract, questionId: question.id, wasDeduped, servedFromPool: false };
 }

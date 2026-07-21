@@ -1,4 +1,5 @@
 import { ApiError, GoogleGenAI } from "@google/genai";
+import { getOrCreateCache } from "./contextCache";
 import { GEMINI_ROUTING } from "./models";
 import {
   parseStructuredResponse,
@@ -62,6 +63,21 @@ function responseText(response: { text?: string }): string {
 }
 
 /**
+ * Builds the config's prompt-delivery half: a cachedContent reference when
+ * context caching is enabled and a cache was created successfully, else
+ * the system prompt inline exactly as before. Caching is a pure cost
+ * optimization (lib/gemini/contextCache.ts) — never load-bearing for
+ * correctness, so any cache failure here silently yields the inline form.
+ */
+async function promptDeliveryConfig(
+  systemPrompt: string,
+  model: string,
+): Promise<{ cachedContent: string } | { systemInstruction: string }> {
+  const cachedContent = await getOrCreateCache(getClient(), systemPrompt, model);
+  return cachedContent ? { cachedContent } : { systemInstruction: systemPrompt };
+}
+
+/**
  * Scoring call: Pro tier, temperature 0, structured output enforced via
  * responseMimeType + responseJsonSchema. Never parses JSON out of prose.
  *
@@ -74,18 +90,32 @@ export async function scoreWithSchema<T>(
   schema: StructuredSchema<T>,
 ): Promise<T> {
   const { model, temperature } = GEMINI_ROUTING.scoring;
-  const response = await withRetry(() =>
-    getClient().models.generateContent({
-      model,
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature,
-        responseMimeType: "application/json",
-        responseJsonSchema: toResponseJsonSchema(schema),
-      },
-    }),
-  );
+  const promptDelivery = await promptDeliveryConfig(systemPrompt, model);
+  const runGenerate = (config: typeof promptDelivery) =>
+    withRetry(() =>
+      getClient().models.generateContent({
+        model,
+        contents: userPrompt,
+        config: {
+          ...config,
+          temperature,
+          responseMimeType: "application/json",
+          responseJsonSchema: toResponseJsonSchema(schema),
+        },
+      }),
+    );
+
+  let response;
+  try {
+    response = await runGenerate(promptDelivery);
+  } catch (error) {
+    // A cachedContent-based call can fail in ways an inline call wouldn't
+    // (e.g. an expired/invalidated cache slipping past the in-memory TTL
+    // check); retry once with the system prompt sent inline rather than
+    // surfacing a scoring failure caused purely by the cost optimization.
+    if (!("cachedContent" in promptDelivery)) throw error;
+    response = await runGenerate({ systemInstruction: systemPrompt });
+  }
   return parseStructuredResponse(responseText(response), schema);
 }
 
@@ -107,18 +137,28 @@ export async function scoreWithSchemaAndAudio<T>(
   if (audio) {
     contents.push({ inlineData: { mimeType: audio.mimeType, data: audio.data.toString("base64") } });
   }
-  const response = await withRetry(() =>
-    getClient().models.generateContent({
-      model,
-      contents,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature,
-        responseMimeType: "application/json",
-        responseJsonSchema: toResponseJsonSchema(schema),
-      },
-    }),
-  );
+  const promptDelivery = await promptDeliveryConfig(systemPrompt, model);
+  const runGenerate = (config: typeof promptDelivery) =>
+    withRetry(() =>
+      getClient().models.generateContent({
+        model,
+        contents,
+        config: {
+          ...config,
+          temperature,
+          responseMimeType: "application/json",
+          responseJsonSchema: toResponseJsonSchema(schema),
+        },
+      }),
+    );
+
+  let response;
+  try {
+    response = await runGenerate(promptDelivery);
+  } catch (error) {
+    if (!("cachedContent" in promptDelivery)) throw error;
+    response = await runGenerate({ systemInstruction: systemPrompt });
+  }
   return parseStructuredResponse(responseText(response), schema);
 }
 

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Generates lib/generated/prisma — needed by typecheck/build/tests.
+      # Does not require a reachable database (schema-only codegen).
+      - run: npx prisma generate
+
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+
+  calibration-gate:
+    name: Calibration regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      # Requires the GEMINI_API_KEY repo secret to score real gold-set
+      # essays. Until both a real GEMINI_API_KEY secret and real
+      # (non-synthetic) essays exist in calibration/, every essay is
+      # skipped/synthetic and the gate passes without judging accuracy —
+      # see calibration/README.md and lib/calibration/regressionGate.ts.
+      # Blocks the merge (non-zero exit) only on an actual accuracy
+      # regression against calibration/baseline.json or a drop below the
+      # target once real data is present.
+      - run: npm run calibrate -- --gate
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

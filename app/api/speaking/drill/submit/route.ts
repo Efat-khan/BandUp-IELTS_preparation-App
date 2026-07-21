@@ -2,6 +2,8 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { resolveUserId } from "@/lib/demoUser";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import { evaluateSpeakingSession } from "@/lib/scoring/evaluateSpeaking";
 import { persistSpeakingEvaluation } from "@/lib/scoring/persistSpeakingEvaluation";
 import { runPostSessionPipelineSafe } from "@/lib/teacher/postSession";
@@ -22,12 +24,11 @@ interface SubmitDrillRequestBody {
 
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.scoring, request);
+    if (limited) return limited;
     return await handleSubmit(request);
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }
 
@@ -99,6 +100,7 @@ async function handleSubmit(request: NextRequest): Promise<Response> {
     overallBand: outcome.overallBand,
     overallUnrounded: outcome.unroundedOverallBand,
     disagreementFlagged: outcome.disagreementFlagged,
+    thirdPassTriggered: outcome.thirdPassTriggered,
     modelSelfEstimatedBand: outcome.modelSelfEstimatedBand,
     pronunciationSource: outcome.pronunciationSource,
     criteria: Object.values(outcome.criteria),

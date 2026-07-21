@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { combineSpeakingDoublePass } from "./speakingDoublePass";
+import {
+  combineSpeakingDoublePass,
+  combineSpeakingWithThirdPass,
+  needsThirdPass,
+} from "./speakingDoublePass";
 import type { SpeakingEvaluation } from "@/lib/gemini/schemas/speakingEvaluation";
 
 function makeEvaluation(bands: { fc: number; lr: number; gra: number; pr: number }): SpeakingEvaluation {
@@ -47,5 +51,29 @@ describe("combineSpeakingDoublePass", () => {
       pass2: 7,
       delta: 2,
     });
+  });
+});
+
+describe("needsThirdPass", () => {
+  it("is true only once a criterion exceeds the third-pass tolerance", () => {
+    const pass1 = makeEvaluation({ fc: 5, lr: 6, gra: 6, pr: 6 });
+    const atBoundary = makeEvaluation({ fc: 6, lr: 6, gra: 6, pr: 6 }); // delta 1.0
+    const overBoundary = makeEvaluation({ fc: 6.5, lr: 6, gra: 6, pr: 6 }); // delta 1.5
+
+    expect(needsThirdPass(combineSpeakingDoublePass(pass1, atBoundary).disagreements)).toBe(false);
+    expect(needsThirdPass(combineSpeakingDoublePass(pass1, overBoundary).disagreements)).toBe(true);
+  });
+});
+
+describe("combineSpeakingWithThirdPass", () => {
+  it("uses the median of the three passes, not their average", () => {
+    const pass1 = makeEvaluation({ fc: 6, lr: 6, gra: 6, pr: 6 });
+    const pass2 = makeEvaluation({ fc: 8, lr: 6, gra: 6, pr: 6 }); // delta 2, triggers
+    const pass3 = makeEvaluation({ fc: 6.5, lr: 6, gra: 6, pr: 6 });
+    const result = combineSpeakingWithThirdPass(pass1, pass2, pass3);
+    // median(6, 8, 6.5) = 6.5 — the average (6.833) would be pulled toward pass2's outlier
+    expect(result.canonicalBands.fluency_coherence).toBe(6.5);
+    expect(result.thirdPassTriggered).toBe(true);
+    expect(result.disagreementFlagged).toBe(true);
   });
 });

@@ -1,10 +1,12 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { rewriteParagraph } from "@/lib/gemini/client";
+import { errorResponse } from "@/lib/http/errorResponse";
 import {
   buildSpeakingModelAnswerSystemPrompt,
   buildSpeakingModelAnswerUserPrompt,
 } from "@/lib/prompts/speakingModelAnswer";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 
 export const dynamic = "force-dynamic";
 
@@ -26,12 +28,11 @@ interface CueCardPoints {
 
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.generation, request);
+    if (limited) return limited;
     return await handleModelAnswer(request);
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }
 

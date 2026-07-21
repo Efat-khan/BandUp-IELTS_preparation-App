@@ -188,6 +188,7 @@ function buildWritingOutcome(params: {
 
   return {
     shortCircuited: false,
+    thirdPassTriggered: false,
     preCheck,
     pass1: doublePass.pass1,
     pass2: doublePass.pass2,
@@ -255,6 +256,7 @@ function buildSpeakingOutcome(bands: {
     criteria,
     upgradePhrases: doublePass.pass1.upgrade_phrases,
     disagreementFlagged: false,
+    thirdPassTriggered: false,
     unroundedOverallBand: unrounded,
     overallBand: band,
     modelSelfEstimatedBand: doublePass.pass1.estimated_overall_band,

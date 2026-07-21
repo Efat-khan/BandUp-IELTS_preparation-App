@@ -47,7 +47,25 @@ that case.
 **Replace or remove the placeholders once real essays-with-known-official-bands
 are added** (e.g. real IELTS Task 1/Task 2 responses with an official
 examiner band), and add as many as you have — the target is ≥85% of
-essays landing within ±0.5 band of the official score. Before merging any
-change to the evaluator (prompts, descriptors, guardrails), re-run
-`npm run calibrate` against the real gold set and do not merge if the
-within-±0.5 percentage drops.
+essays landing within ±0.5 band of the official score.
+
+## CI regression gate
+
+`.github/workflows/ci.yml` runs `npm run calibrate -- --gate` on every PR
+(needs a `GEMINI_API_KEY` repo secret). The gate (`lib/calibration/regressionGate.ts`,
+unit-tested independently of any real essays or API calls) fails the build —
+blocking the merge — when:
+
+- the within-±0.5-band percentage is below the 85% target, or
+- it has dropped at all versus `calibration/baseline.json` (any regression,
+  not just below-target).
+
+A synthetic-only run (no real essays present yet, as in this repo right
+now) always passes the gate without judging accuracy — there's nothing
+real to compare. Once real gold-set essays exist and the evaluator is in a
+state you want to accept, run `npm run calibrate -- --update-baseline`
+(refused on a synthetic-only run) to record `calibration/baseline.json` and
+commit it — every subsequent run, in CI or locally, is compared against
+that baseline. Before merging any change to the evaluator (prompts,
+descriptors, guardrails), re-run `npm run calibrate` locally against the
+real gold set to catch a regression before pushing.

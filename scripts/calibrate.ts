@@ -3,21 +3,36 @@
  * or Task 2) over a gold set of essays with known official bands and
  * reports MAE + % within ±0.5 band, plus a per-criterion drift table.
  *
- * Usage: npm run calibrate
+ * Usage:
+ *   npm run calibrate                      report only (default)
+ *   npm run calibrate -- --gate            also exit non-zero on regression
+ *                                           vs. calibration/baseline.json or
+ *                                           on falling below the target —
+ *                                           this is what CI runs
+ *   npm run calibrate -- --update-baseline write the current run's numbers
+ *                                           as the new accepted baseline
+ *                                           (refused on a synthetic-only run)
  *
- * Reads every *.json file in /calibration (see calibration/README.md for
- * the expected shape). Does not touch the database — this is purely a
- * model-accuracy measurement against evaluateWritingSubmission(), the same
- * core function the /api/evaluate/writing and /api/mock/writing/submit
- * routes use.
+ * Reads every *.json file in /calibration except baseline.json (see
+ * calibration/README.md for the gold-essay format). Does not touch the
+ * database — this is purely a model-accuracy measurement against
+ * evaluateWritingSubmission(), the same core function the
+ * /api/evaluate/writing and /api/mock/writing/submit routes use.
  */
 import "dotenv/config";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as z from "zod";
+import {
+  evaluateRegressionGate,
+  type CalibrationBaseline,
+  type CalibrationMetrics,
+} from "../lib/calibration/regressionGate";
 import { evaluateWritingSubmission, type WritingTaskKind } from "../lib/scoring/evaluateWriting";
+import { EVALUATOR_VERSION } from "../lib/scoring/evaluatorVersion";
 
 const CALIBRATION_DIR = path.resolve(__dirname, "../calibration");
+const BASELINE_PATH = path.join(CALIBRATION_DIR, "baseline.json");
 const DEFAULT_INSTRUCTIONS_BY_TASK: Record<WritingTaskKind, string> = {
   task2: "You should spend about 40 minutes on this task and write at least 250 words.",
   task1_academic: "You should spend about 20 minutes on this task and write at least 150 words.",
@@ -78,7 +93,9 @@ interface SkippedRow {
 function loadCalibrationFiles(): CalibrationEssay[] {
   let filenames: string[];
   try {
-    filenames = readdirSync(CALIBRATION_DIR).filter((f) => f.endsWith(".json"));
+    filenames = readdirSync(CALIBRATION_DIR).filter(
+      (f) => f.endsWith(".json") && f !== "baseline.json",
+    );
   } catch {
     filenames = [];
   }
@@ -86,6 +103,24 @@ function loadCalibrationFiles(): CalibrationEssay[] {
     const raw = JSON.parse(readFileSync(path.join(CALIBRATION_DIR, filename), "utf-8"));
     return CalibrationEssaySchema.parse(raw);
   });
+}
+
+function loadBaseline(): CalibrationBaseline | null {
+  try {
+    return JSON.parse(readFileSync(BASELINE_PATH, "utf-8")) as CalibrationBaseline;
+  } catch {
+    return null;
+  }
+}
+
+function writeBaseline(metrics: CalibrationMetrics): CalibrationBaseline {
+  const baseline: CalibrationBaseline = {
+    ...metrics,
+    evaluatorVersion: EVALUATOR_VERSION,
+    recordedAt: new Date().toISOString(),
+  };
+  writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`, "utf-8");
+  return baseline;
 }
 
 function padRight(s: string, n: number): string {
@@ -163,45 +198,48 @@ async function main() {
     for (const s of skipped) console.log(`  - ${s.id}: ${s.reason}`);
   }
 
+  let mae = 0;
+  let withinHalfPct = 0;
+
   if (scored.length === 0) {
     console.log("\nNo essays were successfully scored — no MAE/drift figures to report.");
-    return;
-  }
+  } else {
+    const overallErrors = scored.map((r) => Math.abs(r.predictedOverall - r.officialOverall));
+    mae = overallErrors.reduce((a, b) => a + b, 0) / overallErrors.length;
+    const withinHalf = overallErrors.filter((e) => e <= 0.5).length;
+    withinHalfPct = (withinHalf / scored.length) * 100;
 
-  const overallErrors = scored.map((r) => Math.abs(r.predictedOverall - r.officialOverall));
-  const mae = overallErrors.reduce((a, b) => a + b, 0) / overallErrors.length;
-  const withinHalf = overallErrors.filter((e) => e <= 0.5).length;
-  const withinHalfPct = (withinHalf / scored.length) * 100;
-
-  console.log(`\nOverall MAE: ${mae.toFixed(3)}`);
-  console.log(
-    `Within ±0.5 band: ${withinHalf}/${scored.length} (${withinHalfPct.toFixed(1)}%) — target ${TARGET_WITHIN_HALF_BAND_PCT}% — ${
-      withinHalfPct >= TARGET_WITHIN_HALF_BAND_PCT ? "MET" : "NOT MET"
-    }`,
-  );
-
-  console.log("\nPer-criterion drift (predicted - official):");
-  console.log(padRight("criterion", 28) + padLeft("mean signed", 14) + padLeft("MAE", 10));
-
-  const primaryDiffs = scored.map((r) => r.predictedPrimary - r.officialPrimary);
-  const primaryMeanSigned = primaryDiffs.reduce((a, b) => a + b, 0) / primaryDiffs.length;
-  const primaryMae = primaryDiffs.reduce((a, b) => a + Math.abs(b), 0) / primaryDiffs.length;
-  console.log(
-    padRight("primary (TR/TA)", 28) +
-      padLeft(primaryMeanSigned.toFixed(3), 14) +
-      padLeft(primaryMae.toFixed(3), 10),
-  );
-
-  for (const key of SECONDARY_CRITERIA_KEYS) {
-    const diffs = scored.map((r) => r.predictedSecondary[key] - r.officialSecondary[key]);
-    const meanSigned = diffs.reduce((a, b) => a + b, 0) / diffs.length;
-    const criterionMae = diffs.reduce((a, b) => a + Math.abs(b), 0) / diffs.length;
+    console.log(`\nOverall MAE: ${mae.toFixed(3)}`);
     console.log(
-      padRight(key, 28) + padLeft(meanSigned.toFixed(3), 14) + padLeft(criterionMae.toFixed(3), 10),
+      `Within ±0.5 band: ${withinHalf}/${scored.length} (${withinHalfPct.toFixed(1)}%) — target ${TARGET_WITHIN_HALF_BAND_PCT}% — ${
+        withinHalfPct >= TARGET_WITHIN_HALF_BAND_PCT ? "MET" : "NOT MET"
+      }`,
     );
+
+    console.log("\nPer-criterion drift (predicted - official):");
+    console.log(padRight("criterion", 28) + padLeft("mean signed", 14) + padLeft("MAE", 10));
+
+    const primaryDiffs = scored.map((r) => r.predictedPrimary - r.officialPrimary);
+    const primaryMeanSigned = primaryDiffs.reduce((a, b) => a + b, 0) / primaryDiffs.length;
+    const primaryMae = primaryDiffs.reduce((a, b) => a + Math.abs(b), 0) / primaryDiffs.length;
+    console.log(
+      padRight("primary (TR/TA)", 28) +
+        padLeft(primaryMeanSigned.toFixed(3), 14) +
+        padLeft(primaryMae.toFixed(3), 10),
+    );
+
+    for (const key of SECONDARY_CRITERIA_KEYS) {
+      const diffs = scored.map((r) => r.predictedSecondary[key] - r.officialSecondary[key]);
+      const meanSigned = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+      const criterionMae = diffs.reduce((a, b) => a + Math.abs(b), 0) / diffs.length;
+      console.log(
+        padRight(key, 28) + padLeft(meanSigned.toFixed(3), 14) + padLeft(criterionMae.toFixed(3), 10),
+      );
+    }
   }
 
   const syntheticCount = essays.filter((e) => e.synthetic).length;
+  const syntheticOnly = essays.length > 0 && syntheticCount === essays.length;
   if (syntheticCount > 0) {
     console.log(
       `\n⚠ ${syntheticCount}/${essays.length} essay(s) are SYNTHETIC PLACEHOLDERS (synthetic: true), not real official-band gold data.`,
@@ -210,6 +248,45 @@ async function main() {
       "  The figures above only prove the harness runs end to end — they are not a real accuracy measurement.",
     );
     console.log("  Replace them with real essays-with-known-official-bands and re-run.");
+  }
+
+  const args = process.argv.slice(2);
+  const gate = args.includes("--gate");
+  const updateBaseline = args.includes("--update-baseline");
+  const currentMetrics: CalibrationMetrics = {
+    withinHalfBandPct: withinHalfPct,
+    mae,
+    scoredCount: scored.length,
+  };
+
+  if (updateBaseline) {
+    if (syntheticOnly || essays.length === 0) {
+      console.log(
+        "\nRefusing to update the baseline: no real (non-synthetic) gold-set essays were scored.",
+      );
+      process.exitCode = 1;
+    } else {
+      const baseline = writeBaseline(currentMetrics);
+      console.log(
+        `\nBaseline updated: ${baseline.withinHalfBandPct.toFixed(1)}% within ±0.5 band, ` +
+          `MAE ${baseline.mae.toFixed(3)}, evaluator ${baseline.evaluatorVersion} (${BASELINE_PATH}).`,
+      );
+    }
+  }
+
+  if (gate) {
+    const baseline = loadBaseline();
+    const result = evaluateRegressionGate({
+      current: currentMetrics,
+      baseline,
+      syntheticOnly,
+      minWithinHalfBandPct: TARGET_WITHIN_HALF_BAND_PCT,
+    });
+
+    console.log(`\n=== CI Gate: ${result.pass ? "PASS" : "FAIL"} ===`);
+    for (const note of result.notes) console.log(`  note: ${note}`);
+    for (const reason of result.blockingReasons) console.log(`  BLOCKING: ${reason}`);
+    if (!result.pass) process.exitCode = 1;
   }
 }
 

@@ -38,6 +38,7 @@ export interface PersistedWritingResult {
   status: "FAILED" | "SCORED" | "FLAGGED";
   wordCount: number;
   disagreementFlagged: boolean;
+  thirdPassTriggered?: boolean;
   overallBand?: number;
   overallUnrounded?: number;
   criteria?: PersistedCriterionResult[];
@@ -93,6 +94,8 @@ export async function persistWritingEvaluation(
     criteria,
     pass1,
     pass2,
+    pass3,
+    thirdPassTriggered,
     disagreementFlagged,
     unroundedTaskBand,
     taskBand,
@@ -132,6 +135,7 @@ export async function persistWritingEvaluation(
     const key = CRITERION_KEY_MAP[criterionId];
     const p1 = pass1[key];
     const p2 = pass2[key];
+    const p3 = pass3?.[key];
     const canonical = criteria[criterionId];
     return [
       {
@@ -152,6 +156,19 @@ export async function persistWritingEvaluation(
         modelId: GEMINI_MODELS.scoring,
         evaluatorVersion: EVALUATOR_VERSION,
       },
+      ...(p3
+        ? [
+            {
+              submissionId: submission.id,
+              pass: 3,
+              criterion: criterionId,
+              score: p3.band,
+              evidence: { evidence: p3.evidence, why: p3.why },
+              modelId: GEMINI_MODELS.scoring,
+              evaluatorVersion: EVALUATOR_VERSION,
+            },
+          ]
+        : []),
       {
         submissionId: submission.id,
         pass: 0,
@@ -163,6 +180,7 @@ export async function persistWritingEvaluation(
           rawBand: canonical.rawBand,
           wordCountPenaltyApplied: canonical.wordCountPenaltyApplied,
           calibrationClamped: canonical.calibrationClamped,
+          thirdPassTriggered,
         },
         modelId: GEMINI_MODELS.scoring,
         evaluatorVersion: EVALUATOR_VERSION,
@@ -190,6 +208,7 @@ export async function persistWritingEvaluation(
     status,
     wordCount: preCheck.wordCount,
     disagreementFlagged,
+    thirdPassTriggered,
     overallBand: taskBand,
     overallUnrounded: unroundedTaskBand,
     criteria: criterionIds.map((criterionId) => {

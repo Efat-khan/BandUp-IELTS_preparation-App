@@ -45,6 +45,7 @@ export async function persistSpeakingEvaluation(
     const key = CRITERION_KEY_MAP[criterionId];
     const p1 = outcome.pass1[key];
     const p2 = outcome.pass2[key];
+    const p3 = outcome.pass3?.[key];
     const canonical = outcome.criteria[criterionId];
     return [
       {
@@ -65,12 +66,29 @@ export async function persistSpeakingEvaluation(
         modelId: GEMINI_MODELS.scoring,
         evaluatorVersion: EVALUATOR_VERSION,
       },
+      ...(p3
+        ? [
+            {
+              submissionId: input.canonicalSubmissionId,
+              pass: 3,
+              criterion: criterionId,
+              score: p3.band,
+              evidence: { evidence: p3.evidence, why: p3.why } as unknown as Prisma.InputJsonValue,
+              modelId: GEMINI_MODELS.scoring,
+              evaluatorVersion: EVALUATOR_VERSION,
+            },
+          ]
+        : []),
       {
         submissionId: input.canonicalSubmissionId,
         pass: 0,
         criterion: criterionId,
         score: canonical.band,
-        evidence: { evidence: canonical.evidence, why: canonical.why } as unknown as Prisma.InputJsonValue,
+        evidence: {
+          evidence: canonical.evidence,
+          why: canonical.why,
+          thirdPassTriggered: outcome.thirdPassTriggered,
+        } as unknown as Prisma.InputJsonValue,
         modelId: GEMINI_MODELS.scoring,
         evaluatorVersion: EVALUATOR_VERSION,
       },

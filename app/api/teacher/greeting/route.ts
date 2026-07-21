@@ -2,8 +2,10 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/demoUser";
 import { teachFreeText } from "@/lib/gemini/client";
+import { errorResponse } from "@/lib/http/errorResponse";
 import { buildGreetingUserPrompt, TUTOR_SYSTEM_PROMPT } from "@/lib/prompts/tutor";
 import { computeMilestones, computeStreaks } from "@/lib/progress/dashboardAggregation";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import { EVALUATOR_VERSION } from "@/lib/scoring/evaluatorVersion";
 import { loadTeacherContext } from "@/lib/teacher/orchestrator";
 
@@ -34,6 +36,8 @@ async function loadMilestoneLines(userId: string): Promise<string[]> {
 
 export async function GET(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.chat, request);
+    if (limited) return limited;
     const userId = await resolveUserId(request.nextUrl.searchParams.get("userId"));
     const [ctx, milestoneLines] = await Promise.all([
       loadTeacherContext(userId),
@@ -45,9 +49,6 @@ export async function GET(request: NextRequest) {
     );
     return Response.json({ greeting, milestones: milestoneLines });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }

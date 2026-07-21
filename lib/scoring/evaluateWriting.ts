@@ -58,6 +58,9 @@ export interface WritingEvaluationOutcome {
   preCheck: WritingPreCheckResult;
   pass1?: WritingEvaluation;
   pass2?: WritingEvaluation;
+  /** Present only when pass1/pass2 diverged by more than THIRD_PASS_TOLERANCE on some criterion (spec §10.4). */
+  pass3?: WritingEvaluation;
+  thirdPassTriggered: boolean;
   criteria?: Record<ScoredCriterionId, CriterionOutcome>;
   disagreementFlagged: boolean;
   /** Authoritative — stored in the DB. */
@@ -113,6 +116,7 @@ export async function evaluateWritingSubmission(
       shortCircuitReason: "Empty submission — nothing to score.",
       preCheck,
       disagreementFlagged: false,
+      thirdPassTriggered: false,
       primaryCriterion,
     };
   }
@@ -123,6 +127,7 @@ export async function evaluateWritingSubmission(
         "The submission does not appear to be coherent English text and was not sent for scoring.",
       preCheck,
       disagreementFlagged: false,
+      thirdPassTriggered: false,
       primaryCriterion,
     };
   }
@@ -171,17 +176,24 @@ export async function evaluateWritingSubmission(
     criteria.GRA.finalBand,
   );
 
+  const estimatedBands = [
+    doublePass.pass1.estimated_task_band,
+    doublePass.pass2.estimated_task_band,
+    ...(doublePass.pass3 ? [doublePass.pass3.estimated_task_band] : []),
+  ];
+
   return {
     shortCircuited: false,
     preCheck,
     pass1: doublePass.pass1,
     pass2: doublePass.pass2,
+    pass3: doublePass.pass3,
+    thirdPassTriggered: doublePass.thirdPassTriggered,
     criteria,
     disagreementFlagged: doublePass.disagreementFlagged,
     unroundedTaskBand: unrounded,
     taskBand: band,
-    modelSelfEstimatedBand:
-      (doublePass.pass1.estimated_task_band + doublePass.pass2.estimated_task_band) / 2,
+    modelSelfEstimatedBand: estimatedBands.reduce((a, b) => a + b, 0) / estimatedBands.length,
     primaryCriterion,
   };
 }

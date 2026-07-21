@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ConfidenceNote } from "./ConfidenceNote";
 
 interface HumanizedCriterion {
   criterion: string;
@@ -80,6 +81,7 @@ export function TutorFeedback({ submissionId }: { submissionId: string }) {
           Overall band {feedback.overallBand.toFixed(1)}
         </p>
         <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">{feedback.overallComment}</p>
+        <ConfidenceNote className="mt-2 text-xs text-violet-600 dark:text-violet-400" />
       </div>
 
       <div className="flex flex-col gap-2">

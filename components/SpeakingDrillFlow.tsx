@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { AudioRecorder } from "./AudioRecorder";
+import { ConfidenceNote } from "./ConfidenceNote";
 import { FluencyTimeline } from "./FluencyTimeline";
+import { PdfReportButton } from "./PdfReportButton";
 import { SpeechRateGauge } from "./SpeechRateGauge";
 import { TutorChat } from "./TutorChat";
 import { TutorFeedback } from "./TutorFeedback";
@@ -36,6 +38,7 @@ interface DrillResult {
   overallBand?: number;
   overallUnrounded?: number;
   disagreementFlagged: boolean;
+  thirdPassTriggered?: boolean;
   modelSelfEstimatedBand?: number;
   pronunciationSource: "MEASURED" | "ESTIMATED";
   criteria: SpeakingCriterionResult[];
@@ -224,7 +227,8 @@ export function SpeakingDrillFlow({ initialQuestion, onComplete }: SpeakingDrill
       )}
 
       {result && question && (
-        <section className="flex flex-col gap-6">
+        <section className="print-report flex flex-col gap-6">
+          <PdfReportButton />
           <TutorFeedback submissionId={result.submissionId} />
           <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
             <div className="flex items-baseline justify-between">
@@ -237,10 +241,12 @@ export function SpeakingDrillFlow({ initialQuestion, onComplete }: SpeakingDrill
                 </span>
               )}
             </div>
+            <ConfidenceNote />
             {result.disagreementFlagged && (
               <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
-                The two scoring passes disagreed on at least one criterion — treat this result as
-                provisional.
+                {result.thirdPassTriggered
+                  ? "The first two scoring passes disagreed by more than a full band on at least one criterion, so a third pass was run and the median of all three was used — treat this result as provisional."
+                  : "The two scoring passes disagreed on at least one criterion — treat this result as provisional."}
               </p>
             )}
             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">

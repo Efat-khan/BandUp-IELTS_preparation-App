@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/demoUser";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import { coachReply } from "@/lib/teacher/orchestrator";
 
 export const dynamic = "force-dynamic";
@@ -24,14 +26,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.chat, request);
+    if (limited) return limited;
     const userId = await resolveUserId(body.userId);
     const reply = await coachReply(userId, body.submissionId ?? null, body.message.trim());
     return Response.json({ reply });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }
 

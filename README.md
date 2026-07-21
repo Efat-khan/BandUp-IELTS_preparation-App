@@ -208,3 +208,29 @@ docker compose exec app sh                                   # shell in the runn
 docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"  # psql into db
 docker compose ps                                             # container + healthcheck status
 ```
+
+## Rate limiting
+
+Every route that calls Gemini (or, for Speaking, the STT provider) is
+rate-limited per client IP by an in-memory fixed-window limiter
+(`lib/rateLimit/`), tiered the same way `lib/gemini/models.ts` tiers model
+routing:
+
+| Tier         | Limit        | Routes                                                                 |
+| ------------ | ------------ | ----------------------------------------------------------------------- |
+| `scoring`    | 5 / minute   | Writing/Speaking/mock evaluation — the Pro-tier double/triple-pass calls |
+| `generation` | 15 / minute  | Question generation, rewrites, diagnostic start/complete, mock start    |
+| `chat`       | 20 / minute  | Coach chat, feedback humanizing, greeting, plan regeneration            |
+| `media`      | 20 / minute  | Speaking part audio submission (STT only, no Gemini scoring)            |
+
+Exceeding a limit returns `429` with a `Retry-After` header and a JSON body
+`{ error, retryAfterSeconds }`; the existing per-page error banners already
+render `error` as-is, so no separate UI was needed. Gemini's own upstream
+`429`/`5xx` (after `lib/gemini/client.ts`'s retry-with-backoff is
+exhausted) gets the same graceful treatment via `lib/http/errorResponse.ts`
+instead of a bare `500`.
+
+The limiter is a single process-local `Map` — correct for this app's
+single-instance Docker Compose deployment, but it would need to move to a
+shared store (Redis, etc.) the moment the app runs as more than one
+instance.

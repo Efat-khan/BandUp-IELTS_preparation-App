@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 import { resolveUserId } from "@/lib/demoUser";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import {
   generateSpeakingDrillQuestion,
   type SpeakingDrillPart,
@@ -23,6 +25,8 @@ async function parseBody(request: NextRequest): Promise<StartDrillRequestBody> {
 
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.generation, request);
+    if (limited) return limited;
     const body = await parseBody(request);
     const part = body.part ?? "part2";
     if (part !== "part1" && part !== "part2") {
@@ -34,9 +38,6 @@ export async function POST(request: NextRequest) {
 
     return Response.json({ id: result.questionId, ...result.contract });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }

@@ -1,7 +1,9 @@
 import type { NextRequest } from "next/server";
 import { resolveUserId } from "@/lib/demoUser";
 import { prisma } from "@/lib/db";
+import { errorResponse } from "@/lib/http/errorResponse";
 import { generateAndPersistQuestion } from "@/lib/questions/generateQuestion";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 
 export const dynamic = "force-dynamic";
 
@@ -20,12 +22,11 @@ async function parseBody(request: NextRequest): Promise<StartMockRequestBody> {
 
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.generation, request);
+    if (limited) return limited;
     return await handleStart(request);
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }
 

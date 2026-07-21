@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { ConfidenceNote } from "./ConfidenceNote";
 import { FluencyTimeline } from "./FluencyTimeline";
+import { PdfReportButton } from "./PdfReportButton";
 import { SpeechRateGauge } from "./SpeechRateGauge";
 import type { TranscribedWord } from "@/lib/stt/transcribe";
 
@@ -39,6 +41,7 @@ export interface SpeakingResult {
   overallBand?: number;
   overallUnrounded?: number;
   disagreementFlagged: boolean;
+  thirdPassTriggered?: boolean;
   modelSelfEstimatedBand?: number;
   pronunciationSource: "MEASURED" | "ESTIMATED";
   criteria: SpeakingCriterionResult[];
@@ -98,7 +101,8 @@ export function SpeakingResultsView({ result, part2Words, part2QuestionId }: Spe
   }
 
   return (
-    <section className="flex flex-col gap-6">
+    <section className="print-report flex flex-col gap-6">
+      <PdfReportButton />
       <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
@@ -110,10 +114,12 @@ export function SpeakingResultsView({ result, part2Words, part2QuestionId }: Spe
             </span>
           )}
         </div>
+        <ConfidenceNote />
         {result.disagreementFlagged && (
           <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
-            The two scoring passes disagreed on at least one criterion — treat this result as
-            provisional.
+            {result.thirdPassTriggered
+              ? "The first two scoring passes disagreed by more than a full band on at least one criterion, so a third pass was run and the median of all three was used — treat this result as provisional."
+              : "The two scoring passes disagreed on at least one criterion — treat this result as provisional."}
           </p>
         )}
         {result.usedNativeAudio && (

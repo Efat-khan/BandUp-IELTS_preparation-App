@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 import { resolveUserId } from "@/lib/demoUser";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import { generateSpeakingSession } from "@/lib/speaking/generateSpeakingSession";
 
 export const dynamic = "force-dynamic";
@@ -19,14 +21,13 @@ async function parseBody(request: NextRequest): Promise<StartRequestBody> {
 
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.generation, request);
+    if (limited) return limited;
     const body = await parseBody(request);
     const userId = await resolveUserId(body.userId);
     const session = await generateSpeakingSession(userId, body.difficulty);
     return Response.json(session);
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }

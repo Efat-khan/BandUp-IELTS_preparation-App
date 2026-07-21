@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rateLimit/enforce";
 import { extractAcousticFeatures } from "@/lib/speaking/acousticFeatures";
 import { extensionForMimeType } from "@/lib/speaking/audioFormat";
 import { getStorageProvider } from "@/lib/storage/audioStorage";
@@ -26,12 +28,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const limited = enforceRateLimit(RATE_LIMITS.media, request);
+    if (limited) return limited;
     return await handleSubmitPart(request, params);
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500 },
-    );
+    return errorResponse(error);
   }
 }
 

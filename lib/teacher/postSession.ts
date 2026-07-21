@@ -191,19 +191,27 @@ export async function runPostSessionPipeline(submissionId: string): Promise<void
   });
   const facts = await buildSessionFacts(submissionId);
 
-  const summaryOut = await analyzeWithSchema(
-    buildSessionSummarizerSystemPrompt(),
-    buildSessionSummarizerUserPrompt(facts),
-    SessionSummaryLLMSchema,
-  );
-  await writeSessionSummary(submission.userId, submissionId, submission.module, summaryOut);
+  // Summarizer and categorizer both derive from `facts` alone and don't
+  // depend on each other's output — batching them halves this stage's
+  // latency (cost control, Phase 5 §2). The narrative below genuinely
+  // needs both results, so it stays sequential after this.
+  const [summaryOut, categorization] = await Promise.all([
+    analyzeWithSchema(
+      buildSessionSummarizerSystemPrompt(),
+      buildSessionSummarizerUserPrompt(facts),
+      SessionSummaryLLMSchema,
+    ),
+    analyzeWithSchema(
+      buildErrorCategorizerSystemPrompt(),
+      buildErrorCategorizerUserPrompt(facts),
+      ErrorCategorizationLLMSchema,
+    ),
+  ]);
 
-  const categorization = await analyzeWithSchema(
-    buildErrorCategorizerSystemPrompt(),
-    buildErrorCategorizerUserPrompt(facts),
-    ErrorCategorizationLLMSchema,
-  );
-  await applyErrorCategorization(submission.userId, submission.module, categorization.errors);
+  await Promise.all([
+    writeSessionSummary(submission.userId, submissionId, submission.module, summaryOut),
+    applyErrorCategorization(submission.userId, submission.module, categorization.errors),
+  ]);
 
   const estimates = await updateCriterionEstimates(submission.userId);
 

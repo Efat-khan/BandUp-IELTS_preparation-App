@@ -24,3 +24,29 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * PDF export of a full feedback report (Phase 5 §4): "Download PDF
+ * report" triggers window.print(), and these rules print ONLY whichever
+ * element(s) carry .print-report (the results views), regardless of where
+ * they sit in the page — everything else collapses to nothing on the
+ * printed/PDF page. .print-hide additionally removes controls (buttons,
+ * chat widgets) that would otherwise sit inside a printed region.
+ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-report,
+  .print-report * {
+    visibility: visible;
+  }
+  .print-report {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+  }
+  .print-hide {
+    display: none !important;
+  }
+}
